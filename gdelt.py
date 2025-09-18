@@ -35,8 +35,21 @@ GDELT_COLUMNS = [
 master = pd.read_csv('masterfilelist.txt', sep=" ", header=None, names=["a", "b", "urls"])
 master['datetime'] = master['urls'].str[37:14]
 master=master.drop(columns=['a','b'])
+master['datetime'] = pd.to_datetime(master["datetime"].strftime('%YYYY%MM%DD%HH%MM%SS'))
 print(master)
 #exit()
+
+mask = (df['master'] > start_date) & (df['date'] <= end_date)
+
+start_dt = "20230901000000"
+end_dt = "20230902000000"
+    
+
+master2 = master[master['datetime'].between(start_dt, end_dt)]
+
+print(master2)
+
+exit()
 
 for url in master.urls:
     df_list = []
@@ -74,7 +87,7 @@ def load_gdelt_period_from_local(masterfile: str, start: str, end: str) -> pd.Da
     master = fetch_master_list_local(masterfile)
     start_dt = datetime.strptime(start, "%Y%m%d%H%M%S")
     end_dt = datetime.strptime(end, "%Y%m%d%H%M%S")
-
+    print(start_dt,end_dt)
     subset = master[(master["datetime"] >= start_dt) & (master["datetime"] <= end_dt)]
 
     if subset.empty:
