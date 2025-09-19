@@ -33,25 +33,22 @@ GDELT_COLUMNS = [
 ]
 
 master = pd.read_csv('masterfilelist.txt', sep=" ", header=None, names=["a", "b", "urls"])
-master['datetime'] = master['urls'].str[37:14]
+master['datetime'] = master['urls'].str.extract(r'(\d{14})(?=\.export)')
+
+master = master.dropna(subset=["datetime"])
 master=master.drop(columns=['a','b'])
-master['datetime'] = pd.to_datetime(master["datetime"].strftime('%YYYY%MM%DD%HH%MM%SS'))
-print(master)
-#exit()
+#master['datetime'] = pd.to_datetime(master["datetime"], format='%Y%m%d%H%M%S')
+start_dt = "20230901120000"
+end_dt = "20230901130000"
 
-mask = (df['master'] > start_date) & (df['date'] <= end_date)
-
-start_dt = "20230901000000"
-end_dt = "20230902000000"
-    
+mask = (master['datetime'] > start_dt) & (master['datetime'] <= end_dt)
 
 master2 = master[master['datetime'].between(start_dt, end_dt)]
 
 print(master2)
 
-exit()
 
-for url in master.urls:
+for url in master2.urls:
     df_list = []
     try:
         print(f"Downloading {url}")
@@ -76,34 +73,8 @@ for url in master.urls:
         print(f"Error processing {url}: {e}")
 
 
-def load_gdelt_period_from_local(masterfile: str, start: str, end: str) -> pd.DataFrame:
-    """
-    Load GDELT data for a given period using a local masterfilelist.txt.
-    Args:
-        masterfile (str): path to masterfilelist.txt
-        start (str): start datetime in 'YYYYMMDDHHMMSS'
-        end (str): end datetime in 'YYYYMMDDHHMMSS'
-    """
-    master = fetch_master_list_local(masterfile)
-    start_dt = datetime.strptime(start, "%Y%m%d%H%M%S")
-    end_dt = datetime.strptime(end, "%Y%m%d%H%M%S")
-    print(start_dt,end_dt)
-    subset = master[(master["datetime"] >= start_dt) & (master["datetime"] <= end_dt)]
+df_list=pd.dataframe()
 
-    if subset.empty:
-        print("No files match the requested period.")
-        return pd.DataFrame(columns=GDELT_COLUMNS)
-
-    urls = subset["url"].tolist()
-    return download_and_parse(urls)
-
-
-# Example usage:
-df = load_gdelt_period_from_local("masterfilelist.txt", "20230901000000", "20230903000000")
-# print(df.shape)
-# print(df.head())
-
-print(df)
 # 2) custom glob:
 #    df = load_gdelt_data("data/**/*.CSV.zip")
 # 3) single file or directory:
