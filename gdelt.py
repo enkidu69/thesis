@@ -41,7 +41,7 @@ master=master.drop(columns=['a','b'])
 start_dt = "20230901120000"
 end_dt = "20230901130000"
 
-mask = (master['datetime'] > start_dt) & (master['datetime'] <= end_dt)
+#mask = (master['datetime'] > start_dt) & (master['datetime'] <= end_dt)
 
 master2 = master[master['datetime'].between(start_dt, end_dt)]
 
@@ -73,7 +73,11 @@ for url in master2.urls:
         print(f"Error processing {url}: {e}")
 
 
-df_list=pd.DataFrame()
+
+table = pd.concat(df_list, ignore_index=True)
+table["DATEADDED"] = pd.to_datetime(table["DATEADDED"], format="%Y%m%d%H%M%S", errors="coerce")
+
+
 
 # 2) custom glob:
 #    df = load_gdelt_data("data/**/*.CSV.zip")
