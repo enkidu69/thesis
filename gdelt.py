@@ -1,19 +1,10 @@
 import pandas as pd
-import glob
+import requests, zipfile, io, csv, os, random, string
 from pathlib import Path
-import zipfile
-import io
-import csv
-from typing import Optional, Tuple, List
-import os
-import random
-import string
-import requests
-from datetime import datetime
 
-desk=os.getcwd()
+desk = os.getcwd()
+
 # GDELT v2 column names (61 cols)
-
 GDELT_COLUMNS = [
     "GLOBALEVENTID", "SQLDATE", "MonthYear", "Year", "FractionDate", "Actor1Code",
     "Actor1Name", "Actor1CountryCode", "Actor1KnownGroupCode", "Actor1EthnicCode",
@@ -32,26 +23,27 @@ GDELT_COLUMNS = [
     "DATEADDED", "SOURCEURL"
 ]
 
-master = pd.read_csv('masterfilelist.txt', sep=" ", header=None, names=["a", "b", "urls"])
-master['datetime'] = master['urls'].str.extract(r'(\d{14})(?=\.export)')
 
-master = master.dropna(subset=["datetime"])
-master=master.drop(columns=['a','b'])
-#master['datetime'] = pd.to_datetime(master["datetime"], format='%Y%m%d%H%M%S')
-start_dt = "20240801000000"
-end_dt = "20240919130000"
+# --- Load master list ---
+master = pd.read_csv("masterfilelist.txt", sep=" ", header=None, names=["a", "b", "urls"])
 
-#mask = (master['datetime'] > start_dt) & (master['datetime'] <= end_dt)
+master["datetime"] = pd.to_datetime(
+    master["urls"].str.extract(r"(\d{14})(?=\.export)")[0],
+    format="%Y%m%d%H%M%S",
+    errors="coerce"
+)
 
-master2 = master[master['datetime'].between(start_dt, end_dt)]
+master = master.dropna(subset=["datetime"]).drop(columns=["a", "b"])
 
-print(master2)
+# --- Date range filter ---
+start_dt = pd.to_datetime("20240920000000", format="%Y%m%d%H%M%S")
+end_dt   = pd.to_datetime("20240920001500", format="%Y%m%d%H%M%S")
 
-Data=pd.DataFrame()
+master2 = master[master["datetime"].between(start_dt, end_dt)]
 
+# --- Download & parse files ---
+all_dfs = []
 for url in master2.urls:
-    df_list = []
-    
     try:
         print(f"Downloading {url}")
         r = requests.get(url, stream=True)
@@ -70,29 +62,24 @@ for url in master2.urls:
                             quoting=csv.QUOTE_NONE,
                             on_bad_lines="skip"
                         )
-                        df_list.append(df)
-                       
+                        all_dfs.append(df)
     except Exception as e:
         print(f"Error processing {url}: {e}")
-    Data=pd.concat([df,Data])
+
+Data = pd.concat(all_dfs, ignore_index=True)
+Data=Data[(Data["IsRootEvent"] == 1)]
+Data['GeoCountries']  = Data["Actor1Geo_CountryCode"]+Data["Actor2Geo_CountryCode"]
+# --- Filter by country ---
+#Data = Data[(Data["Actor1Geo_CountryCode"] == "LB") | (Data["Actor1Geo_CountryCode"] == "IL") | (Data["Actor2Geo_CountryCode"] == "LB") | (Data["Actor2Geo_CountryCode"] == "IL")]
 
 
-#frame = pd.concat(df_list, axis=0, ignore_index=True)
 
-Data['GeoCountries']  = list(zip(Data.Actor1Geo_CountryCode, data.Actor2Geo_CountryCode))
-Data=Data[Data["GeoCountries"].str.contains("LB", na=False)]
-
-#table = frame
+# --- Fix DATEADDED ---
 Data["DATEADDED"] = pd.to_datetime(Data["DATEADDED"], format="%Y%m%d%H%M%S", errors="coerce")
 
+# --- Save to Excel ---
+random_str = "".join(random.choices(string.ascii_letters + string.digits, k=8))
+filename = Path(desk) / f"gdelt_{random_str}.xlsx"
+Data.to_excel(filename, index=False, engine="xlsxwriter")
 
-
-# 2) custom glob:
-#    df = load_gdelt_data("data/**/*.CSV.zip")
-# 3) single file or directory:
-#    df = load_gdelt_data("data/2019-01-01.CSV.zip")
-random_str = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
-filename= desk+'\\gdelt'+random_str+'.xlsx'
-writer = pd.ExcelWriter(filename,engine='xlsxwriter')
-Data.to_excel(writer, index = False)
-writer.close()
+print(f"Saved {len(Data)} rows -> {filename}")
