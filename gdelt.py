@@ -47,9 +47,11 @@ master2 = master[master['datetime'].between(start_dt, end_dt)]
 
 print(master2)
 
+Data=pd.DataFrame()
 
 for url in master2.urls:
     df_list = []
+    
     try:
         print(f"Downloading {url}")
         r = requests.get(url, stream=True)
@@ -69,13 +71,17 @@ for url in master2.urls:
                             on_bad_lines="skip"
                         )
                         df_list.append(df)
+                       
     except Exception as e:
         print(f"Error processing {url}: {e}")
+    Data=pd.concat([df,Data])
 
 
+#frame = pd.concat(df_list, axis=0, ignore_index=True)
 
-table = pd.concat(df_list, ignore_index=True)
-table["DATEADDED"] = pd.to_datetime(table["DATEADDED"], format="%Y%m%d%H%M%S", errors="coerce")
+
+#table = frame
+Data["DATEADDED"] = pd.to_datetime(Data["DATEADDED"], format="%Y%m%d%H%M%S", errors="coerce")
 
 
 
@@ -86,5 +92,5 @@ table["DATEADDED"] = pd.to_datetime(table["DATEADDED"], format="%Y%m%d%H%M%S", e
 random_str = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
 filename= desk+'\\gdelt'+random_str+'.xlsx'
 writer = pd.ExcelWriter(filename,engine='xlsxwriter')
-df.to_excel(writer, index = False)
+Data.to_excel(writer, index = False)
 writer.close()
