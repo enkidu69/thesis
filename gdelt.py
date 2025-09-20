@@ -38,8 +38,8 @@ master['datetime'] = master['urls'].str.extract(r'(\d{14})(?=\.export)')
 master = master.dropna(subset=["datetime"])
 master=master.drop(columns=['a','b'])
 #master['datetime'] = pd.to_datetime(master["datetime"], format='%Y%m%d%H%M%S')
-start_dt = "20230901120000"
-end_dt = "20230901130000"
+start_dt = "20240801000000"
+end_dt = "20240919130000"
 
 #mask = (master['datetime'] > start_dt) & (master['datetime'] <= end_dt)
 
@@ -79,6 +79,8 @@ for url in master2.urls:
 
 #frame = pd.concat(df_list, axis=0, ignore_index=True)
 
+Data['GeoCountries']  = list(zip(Data.Actor1Geo_CountryCode, data.Actor2Geo_CountryCode))
+Data=Data[Data["GeoCountries"].str.contains("LB", na=False)]
 
 #table = frame
 Data["DATEADDED"] = pd.to_datetime(Data["DATEADDED"], format="%Y%m%d%H%M%S", errors="coerce")
