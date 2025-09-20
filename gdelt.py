@@ -73,7 +73,7 @@ for url in master2.urls:
         print(f"Error processing {url}: {e}")
 
 
-df_list=pd.dataframe()
+df_list=pd.DataFrame()
 
 # 2) custom glob:
 #    df = load_gdelt_data("data/**/*.CSV.zip")
