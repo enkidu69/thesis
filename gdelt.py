@@ -36,8 +36,8 @@ master["datetime"] = pd.to_datetime(
 master = master.dropna(subset=["datetime"]).drop(columns=["a", "b"])
 
 # --- Date range filter ---
-start_dt = pd.to_datetime("20240920000000", format="%Y%m%d%H%M%S")
-end_dt   = pd.to_datetime("20240920001500", format="%Y%m%d%H%M%S")
+start_dt = pd.to_datetime("20240915000000", format="%Y%m%d%H%M%S")
+end_dt   = pd.to_datetime("20240919234500", format="%Y%m%d%H%M%S")
 
 master2 = master[master["datetime"].between(start_dt, end_dt)]
 
@@ -70,16 +70,21 @@ Data = pd.concat(all_dfs, ignore_index=True)
 Data=Data[(Data["IsRootEvent"] == 1)]
 Data['GeoCountries']  = Data["Actor1Geo_CountryCode"]+Data["Actor2Geo_CountryCode"]
 # --- Filter by country ---
-#Data = Data[(Data["Actor1Geo_CountryCode"] == "LB") | (Data["Actor1Geo_CountryCode"] == "IL") | (Data["Actor2Geo_CountryCode"] == "LB") | (Data["Actor2Geo_CountryCode"] == "IL")]
+Data = Data[(Data["Actor1Geo_CountryCode"] == "LE") | (Data["Actor1Geo_CountryCode"] == "IS") | (Data["Actor2Geo_CountryCode"] == "LE") | (Data["Actor2Geo_CountryCode"] == "IS")]
 
 
 
 # --- Fix DATEADDED ---
 Data["DATEADDED"] = pd.to_datetime(Data["DATEADDED"], format="%Y%m%d%H%M%S", errors="coerce")
+Data["DATEADDED_DISPLAY"] = Data["DATEADDED"].dt.strftime("%Y-%m-%d %H:%M:%S")
+
+Data = Data.drop(columns=["SQLDATE", "MonthYear","Year","ActionGeo_FeatureID","FractionDate","Actor1Geo_ADM1Code", "Actor1Geo_ADM2Code", "Actor1Geo_Lat","Actor1Geo_Long","Actor2Geo_ADM1Code", "Actor2Geo_ADM2Code", "Actor2Geo_Lat","Actor2Geo_Long"])
+
+
 
 # --- Save to Excel ---
 random_str = "".join(random.choices(string.ascii_letters + string.digits, k=8))
-filename = Path(desk) / f"gdelt_{random_str}.xlsx"
+filename = Path(desk) /f"gdelt_{random_str}.xlsx"
 Data.to_excel(filename, index=False, engine="xlsxwriter")
 
 print(f"Saved {len(Data)} rows -> {filename}")
