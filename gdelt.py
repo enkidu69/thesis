@@ -25,7 +25,8 @@ GDELT_COLUMNS = [
 
 
 # --- Load master list ---
-master = pd.read_csv("masterfilelist.txt", sep=" ", header=None, names=["a", "b", "urls"])
+urlmaster="http://data.gdeltproject.org/gdeltv2/masterfilelist.txt"
+master = pd.read_csv(urlmaster, sep=" ", header=None, names=["a", "b", "urls"])
 
 master["datetime"] = pd.to_datetime(
     master["urls"].str.extract(r"(\d{14})(?=\.export)")[0],
