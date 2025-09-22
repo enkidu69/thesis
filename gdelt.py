@@ -36,8 +36,8 @@ master["datetime"] = pd.to_datetime(
 master = master.dropna(subset=["datetime"]).drop(columns=["a", "b"])
 
 # --- Date range filter ---
-start_dt = pd.to_datetime("20240915000000", format="%Y%m%d%H%M%S")
-end_dt   = pd.to_datetime("20240919234500", format="%Y%m%d%H%M%S")
+start_dt = pd.to_datetime("20250901000000", format="%Y%m%d%H%M%S")
+end_dt   = pd.to_datetime("20250922004500", format="%Y%m%d%H%M%S")
 
 master2 = master[master["datetime"].between(start_dt, end_dt)]
 
@@ -69,8 +69,10 @@ for url in master2.urls:
 Data = pd.concat(all_dfs, ignore_index=True)
 Data=Data[(Data["IsRootEvent"] == 1)]
 Data['GeoCountries']  = Data["Actor1Geo_CountryCode"]+Data["Actor2Geo_CountryCode"]
+Data['Goldstein*diffusion'] = Data["GoldsteinScale"]*(Data["NumMentions"]+Data["NumSources"]+Data["NumArticles"])
 # --- Filter by country ---
-Data = Data[(Data["Actor1Geo_CountryCode"] == "LE") | (Data["Actor1Geo_CountryCode"] == "IS") | (Data["Actor2Geo_CountryCode"] == "LE") | (Data["Actor2Geo_CountryCode"] == "IS")]
+#Data = Data[(Data["GeoCountries"] == "UK") | (Data["GeoCountries"] == "ISLE")]
+Data=Data[Data["GeoCountries"].str.contains("UK", na=False)]
 
 
 
