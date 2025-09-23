@@ -25,6 +25,46 @@ GDELT_COLUMNS = [
 ]
 
 
+# CAMEO event codes used for geopolitical risk (from the study)
+
+# External risk events
+roote=[]
+codes = [
+    24,   # Call for political reform
+    25,   # Call for compromise
+    28,   # Call for mediation
+    9,    # Investigate
+    104,  # Demand political reform
+    105,  # Demand target compromise
+    11,   # Criticism
+    13,   # Threat
+    15,   # Show of military force
+    16,   # Reduce relations
+    17,   # Coerce
+    18,   # Assault / Attack
+    19,   # Military clash
+    20,    # Non-conventional mass violence
+# Internal risk events
+    #120,190,#test
+    24,   # Call for political reform
+    25,   # Call for compromise
+    104,  # Demand political reform
+    105,  # Demand target compromise
+    112,  # Condemn
+    113,  # Express collective opposition
+    123,  # Refuse political reform
+    124,  # Refuse to yield / compromise
+    125,  # Refuse to meet / mediate
+    127,  # Refuse agreement
+    128,  # Defy law / norms / rules
+    13,   # Threat
+    14,   # Protest / Demonstrate
+    15,   # Show of military force
+    17,   # Coerce
+    18,   # Assault / Attack
+    19,   # Military clash
+    20    # Non-conventional mass violence
+]
 # --- Load master list ---
 urlmaster="http://data.gdeltproject.org/gdeltv2/masterfilelist.txt"
 master = pd.read_csv(urlmaster, sep=" ", header=None, names=["a", "b", "urls"])
@@ -38,7 +78,7 @@ master["datetime"] = pd.to_datetime(
 master = master.dropna(subset=["datetime"]).drop(columns=["a", "b"])
 
 # --- Date range filter ---
-start_dt = pd.to_datetime("20250916000000", format="%Y%m%d%H%M%S")
+start_dt = pd.to_datetime("20250922000000", format="%Y%m%d%H%M%S")
 end_dt   = pd.to_datetime("20250922004500", format="%Y%m%d%H%M%S")
 
 master2 = master[master["datetime"].between(start_dt, end_dt)]
@@ -55,21 +95,36 @@ for url in master2.urls:
                 if member.lower().endswith(".csv"):
                     with z.open(member) as f:
                         wrapper = io.TextIOWrapper(f, encoding="utf-8", errors="replace")
+                        #added dtype=str
                         df = pd.read_csv(
                             wrapper,
                             sep="\t",
-                            header=None,
+                            header=None, #dtype=str,
                             names=GDELT_COLUMNS,
                             low_memory=False,
                             quoting=csv.QUOTE_NONE,
                             on_bad_lines="skip"
                         )
+                        #drop columns before processing to reduce processing need
+                        df = df.drop(columns=["SQLDATE", "MonthYear","Year","ActionGeo_FeatureID","FractionDate","Actor1Geo_ADM1Code", "Actor1Geo_ADM2Code", "Actor1Geo_Lat","Actor1Geo_Long","Actor2Geo_ADM1Code", "Actor2Geo_ADM2Code", "Actor2Geo_Lat","Actor2Geo_Long"])
+                        df = df.drop_duplicates('SOURCEURL', keep='last')
+                        #filter for root events
+                        
+                        df=df[(df["IsRootEvent"]== 1)]
+                        #filter only for relevant CAMEO events
+                        #print(df)
+                        #exit()
+                        df=df[df["EventCode"].astype(int).isin(codes)]
                         all_dfs.append(df)
+                        
     except Exception as e:
         print(f"Error processing {url}: {e}")
 
 Data = pd.concat(all_dfs, ignore_index=True)
-Data=Data[(Data["IsRootEvent"] == 1)]
+#filter as root event
+#Data=Data[(Data["IsRootEvent"] == 1)]
+#filter by CAMEO cat
+#Data=Data[Data["EventCode"].astype(int).isin(codes)]
 Data['GeoCountries']  = Data["Actor1Geo_CountryCode"]+Data["Actor2Geo_CountryCode"]
 Data['Goldstein*diffusion'] = Data["GoldsteinScale"]*(Data["NumMentions"]+Data["NumSources"]+Data["NumArticles"])
 # --- Filter by country ---
@@ -82,13 +137,13 @@ Data=Data[Data["GeoCountries"].str.contains("UK", na=False)]
 Data["DATEADDED"] = pd.to_datetime(Data["DATEADDED"], format="%Y%m%d%H%M%S", errors="coerce")
 Data["DATEADDED_DISPLAY"] = Data["DATEADDED"].dt.strftime("%Y-%m-%d %H:%M:%S")
 
-Data = Data.drop(columns=["SQLDATE", "MonthYear","Year","ActionGeo_FeatureID","FractionDate","Actor1Geo_ADM1Code", "Actor1Geo_ADM2Code", "Actor1Geo_Lat","Actor1Geo_Long","Actor2Geo_ADM1Code", "Actor2Geo_ADM2Code", "Actor2Geo_Lat","Actor2Geo_Long"])
+#Data = Data.drop(columns=["SQLDATE", "MonthYear","Year","ActionGeo_FeatureID","FractionDate","Actor1Geo_ADM1Code", "Actor1Geo_ADM2Code", "Actor1Geo_Lat","Actor1Geo_Long","Actor2Geo_ADM1Code", "Actor2Geo_ADM2Code", "Actor2Geo_Lat","Actor2Geo_Long"])
 
 # Conversione in datetime
 Data["datetime"] = pd.to_datetime(Data["DATEADDED"], format="%Y%m%d%H%M%S")
 
 # Estrazione ora (arrotondata all’ora intera)
-Data["hour"] = Data["datetime"].dt.to_period("H")
+Data["hour"] = Data["datetime"].dt.to_period("h")
 
 # Trasformazioni log(1+x) sulle metriche di diffusione
 Data["M"] = np.log1p(Data["NumMentions"])
