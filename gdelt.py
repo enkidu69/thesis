@@ -1,6 +1,7 @@
 import pandas as pd
 import requests, zipfile, io, csv, os, random, string
 from pathlib import Path
+import numpy as np
 
 desk = os.getcwd()
 
@@ -37,7 +38,7 @@ master["datetime"] = pd.to_datetime(
 master = master.dropna(subset=["datetime"]).drop(columns=["a", "b"])
 
 # --- Date range filter ---
-start_dt = pd.to_datetime("20250901000000", format="%Y%m%d%H%M%S")
+start_dt = pd.to_datetime("20250916000000", format="%Y%m%d%H%M%S")
 end_dt   = pd.to_datetime("20250922004500", format="%Y%m%d%H%M%S")
 
 master2 = master[master["datetime"].between(start_dt, end_dt)]
@@ -83,7 +84,45 @@ Data["DATEADDED_DISPLAY"] = Data["DATEADDED"].dt.strftime("%Y-%m-%d %H:%M:%S")
 
 Data = Data.drop(columns=["SQLDATE", "MonthYear","Year","ActionGeo_FeatureID","FractionDate","Actor1Geo_ADM1Code", "Actor1Geo_ADM2Code", "Actor1Geo_Lat","Actor1Geo_Long","Actor2Geo_ADM1Code", "Actor2Geo_ADM2Code", "Actor2Geo_Lat","Actor2Geo_Long"])
 
+# Conversione in datetime
+Data["datetime"] = pd.to_datetime(Data["DATEADDED"], format="%Y%m%d%H%M%S")
 
+# Estrazione ora (arrotondata all’ora intera)
+Data["hour"] = Data["datetime"].dt.to_period("H")
+
+# Trasformazioni log(1+x) sulle metriche di diffusione
+Data["M"] = np.log1p(Data["NumMentions"])
+Data["S"] = np.log1p(Data["NumSources"])
+Data["A"] = np.log1p(Data["NumArticles"])
+
+# Fattore di diffusione
+Data["D"] = Data["M"] + Data["S"] + Data["A"]
+
+# Gravità conflittuale (solo eventi negativi)
+Data["C"] = Data["GoldsteinScale"].apply(lambda x: max(0, -x))
+
+# Contributo di rischio per evento
+Data["EventRisk"] = Data["C"] * Data["D"]
+
+# Aggregazione per Paese e ora
+agg = (
+    Data.groupby(["ActionGeo_CountryCode", "hour"])
+    .agg(
+        RawRisk=("EventRisk", "sum"),
+        MediaVol=("NumArticles", "sum"),
+        Events=("EventRisk", "count")
+    )
+    .reset_index()
+)
+
+# Normalizzazione rischio per volume mediale
+agg["Index"] = agg["RawRisk"] / (agg["MediaVol"] + 1)
+
+# Standardizzazione z-score (rispetto a tutto il dataset)
+agg["Index_zscore"] = (agg["Index"] - agg["Index"].mean()) / agg["Index"].std()
+
+# Risultati
+print(agg.head(20))
 
 # --- Save to Excel ---
 random_str = "".join(random.choices(string.ascii_letters + string.digits, k=8))
