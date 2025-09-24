@@ -179,6 +179,15 @@ Data["EventRiskAll"] = Data["GoldsteinScale"] * Data["D"]
 Data["DATEADDED"] = pd.to_datetime(Data["DATEADDED"], errors="coerce")
 Data = Data.dropna(subset=["DATEADDED"])
 
+
+# --- Save to Excel ---
+random_str = "".join(random.choices(string.ascii_letters + string.digits, k=8))
+filename = Path(desk) /f"gdelt_{random_str}.xlsx"
+Data.to_excel(filename, index=False, engine="xlsxwriter")
+
+print(f"Saved {len(Data)} rows -> {filename}")
+
+
 #plotting as financial 
 ohlc = Data.set_index("DATEADDED")["EventRiskAll"].resample("D").ohlc()
 ohlc.index.name = "DATEADDED"  # make sure index is DateTime
@@ -205,9 +214,3 @@ agg["Index_zscore"] = (agg["Index"] - agg["Index"].mean()) / agg["Index"].std()
 # Risultati
 print(agg.head(20))
 
-# --- Save to Excel ---
-random_str = "".join(random.choices(string.ascii_letters + string.digits, k=8))
-filename = Path(desk) /f"gdelt_{random_str}.xlsx"
-Data.to_excel(filename, index=False, engine="xlsxwriter")
-
-print(f"Saved {len(Data)} rows -> {filename}")
