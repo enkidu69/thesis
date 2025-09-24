@@ -2,6 +2,7 @@ import pandas as pd
 import requests, zipfile, io, csv, os, random, string
 from pathlib import Path
 import numpy as np
+import mplfinance as mpf
 
 desk = os.getcwd()
 
@@ -78,8 +79,8 @@ master["datetime"] = pd.to_datetime(
 master = master.dropna(subset=["datetime"]).drop(columns=["a", "b"])
 
 # --- Date range filter ---
-start_dt = pd.to_datetime("20250922000000", format="%Y%m%d%H%M%S")
-end_dt   = pd.to_datetime("20250922004500", format="%Y%m%d%H%M%S")
+start_dt = pd.to_datetime("20250901000000", format="%Y%m%d%H%M%S")
+end_dt   = pd.to_datetime("20250921010000", format="%Y%m%d%H%M%S")
 
 master2 = master[master["datetime"].between(start_dt, end_dt)]
 
@@ -105,24 +106,33 @@ for url in master2.urls:
                             quoting=csv.QUOTE_NONE,
                             on_bad_lines="skip"
                         )
+                        #print(df)
                         #drop columns before processing to reduce processing need
+                        #
+                        #print(df)
+                        
+                        #exit()
                         df = df.drop(columns=["SQLDATE", "MonthYear","Year","ActionGeo_FeatureID","FractionDate","Actor1Geo_ADM1Code", "Actor1Geo_ADM2Code", "Actor1Geo_Lat","Actor1Geo_Long","Actor2Geo_ADM1Code", "Actor2Geo_ADM2Code", "Actor2Geo_Lat","Actor2Geo_Long"])
-                        df = df.drop_duplicates('SOURCEURL', keep='last')
+                        
+                        
+                        
                         #filter for root events
                         
                         df=df[(df["IsRootEvent"]== 1)]
-                        #filter only for relevant CAMEO events
-                        #print(df)
-                        #exit()
+                        #df['GeoCountries']  = df["Actor1Geo_CountryCode"]+df["Actor2Geo_CountryCode"]
+                        #df=df[df["GeoCountries"].str.contains("UK", na=False)]
                         df=df[df["EventCode"].astype(int).isin(codes)]
+                        #filter only for relevant CAMEO events
+
+                        #df=df[df["EventCode"].astype(int).isin(codes)]
                         all_dfs.append(df)
                         
     except Exception as e:
         print(f"Error processing {url}: {e}")
 
 Data = pd.concat(all_dfs, ignore_index=True)
-#filter as root event
-#Data=Data[(Data["IsRootEvent"] == 1)]
+
+
 #filter by CAMEO cat
 #Data=Data[Data["EventCode"].astype(int).isin(codes)]
 Data['GeoCountries']  = Data["Actor1Geo_CountryCode"]+Data["Actor2Geo_CountryCode"]
@@ -131,11 +141,16 @@ Data['Goldstein*diffusion'] = Data["GoldsteinScale"]*(Data["NumMentions"]+Data["
 #Data = Data[(Data["GeoCountries"] == "UK") | (Data["GeoCountries"] == "ISLE")]
 Data=Data[Data["GeoCountries"].str.contains("UK", na=False)]
 
+#drop duplicates
+Data=Data.drop_duplicates(subset=['SOURCEURL', 'GeoCountries'], keep='last')
+
 
 
 # --- Fix DATEADDED ---
 Data["DATEADDED"] = pd.to_datetime(Data["DATEADDED"], format="%Y%m%d%H%M%S", errors="coerce")
 Data["DATEADDED_DISPLAY"] = Data["DATEADDED"].dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
 
 #Data = Data.drop(columns=["SQLDATE", "MonthYear","Year","ActionGeo_FeatureID","FractionDate","Actor1Geo_ADM1Code", "Actor1Geo_ADM2Code", "Actor1Geo_Lat","Actor1Geo_Long","Actor2Geo_ADM1Code", "Actor2Geo_ADM2Code", "Actor2Geo_Lat","Actor2Geo_Long"])
 
@@ -156,16 +171,27 @@ Data["D"] = Data["M"] + Data["S"] + Data["A"]
 # Gravità conflittuale (solo eventi negativi)
 Data["C"] = Data["GoldsteinScale"].apply(lambda x: max(0, -x))
 
+
 # Contributo di rischio per evento
-Data["EventRisk"] = Data["C"] * Data["D"]
+Data["EventRiskNegative"] = Data["C"] * Data["D"]
+#consider also positive events
+Data["EventRiskAll"] = Data["GoldsteinScale"] * Data["D"]
+Data["DATEADDED"] = pd.to_datetime(Data["DATEADDED"], errors="coerce")
+Data = Data.dropna(subset=["DATEADDED"])
+
+#plotting as financial 
+ohlc = Data.set_index("DATEADDED")["EventRiskAll"].resample("D").ohlc()
+ohlc.index.name = "DATEADDED"  # make sure index is DateTime
+mpf.plot(ohlc, type="candle", style="charles", title="Goldstein Index Candlestick", ylabel="Goldstein Scale")
+
 
 # Aggregazione per Paese e ora
 agg = (
     Data.groupby(["ActionGeo_CountryCode", "hour"])
     .agg(
-        RawRisk=("EventRisk", "sum"),
+        RawRisk=("EventRiskNegative", "sum"),
         MediaVol=("NumArticles", "sum"),
-        Events=("EventRisk", "count")
+        Events=("EventRiskNegative", "count")
     )
     .reset_index()
 )
