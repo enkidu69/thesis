@@ -30,7 +30,13 @@ GDELT_COLUMNS = [
 
 # External risk events
 roote=[]
-codes = [
+
+#new root codes
+rcodes = [2,9,10,11,13,15,16,17,18,19,20]
+
+
+#old codes
+codes1 = [
     24,   # Call for political reform
     25,   # Call for compromise
     28,   # Call for mediation
@@ -44,9 +50,9 @@ codes = [
     17,   # Coerce
     18,   # Assault / Attack
     19,   # Military clash
-    20,    # Non-conventional mass violence
+    20]    # Non-conventional mass violence
 # Internal risk events
-    #120,190,#test
+sub = [    #120,190,#test
     24,   # Call for political reform
     25,   # Call for compromise
     104,  # Demand political reform
@@ -79,8 +85,8 @@ master["datetime"] = pd.to_datetime(
 master = master.dropna(subset=["datetime"]).drop(columns=["a", "b"])
 
 # --- Date range filter ---
-start_dt = pd.to_datetime("20250901000000", format="%Y%m%d%H%M%S")
-end_dt   = pd.to_datetime("20250921010000", format="%Y%m%d%H%M%S")
+start_dt = pd.to_datetime("20250910000000", format="%Y%m%d%H%M%S")
+end_dt   = pd.to_datetime("20250922010000", format="%Y%m%d%H%M%S")
 
 master2 = master[master["datetime"].between(start_dt, end_dt)]
 
@@ -121,7 +127,9 @@ for url in master2.urls:
                         df=df[(df["IsRootEvent"]== 1)]
                         #df['GeoCountries']  = df["Actor1Geo_CountryCode"]+df["Actor2Geo_CountryCode"]
                         #df=df[df["GeoCountries"].str.contains("UK", na=False)]
-                        df=df[df["EventCode"].astype(int).isin(codes)]
+                        #filter based on rootcodes instead of codes
+                        df=df[df["EventRootCode"].astype(int).isin(rcodes)]
+                        #df=df[df["EventCode"].astype(int).isin(codes)]
                         #filter only for relevant CAMEO events
 
                         #df=df[df["EventCode"].astype(int).isin(codes)]
@@ -135,7 +143,7 @@ Data = pd.concat(all_dfs, ignore_index=True)
 
 #filter by CAMEO cat
 #Data=Data[Data["EventCode"].astype(int).isin(codes)]
-Data['GeoCountries']  = Data["Actor1Geo_CountryCode"]+Data["Actor2Geo_CountryCode"]
+Data['GeoCountries']  = Data["Actor1Geo_CountryCode"]+"+"+Data["Actor2Geo_CountryCode"]
 Data['Goldstein*diffusion'] = Data["GoldsteinScale"]*(Data["NumMentions"]+Data["NumSources"]+Data["NumArticles"])
 # --- Filter by country ---
 #Data = Data[(Data["GeoCountries"] == "UK") | (Data["GeoCountries"] == "ISLE")]
@@ -189,10 +197,15 @@ print(f"Saved {len(Data)} rows -> {filename}")
 
 
 #plotting as financial 
+#need for a cumulated
+
+
 ohlc = Data.set_index("DATEADDED")["EventRiskAll"].resample("D").ohlc()
 ohlc.index.name = "DATEADDED"  # make sure index is DateTime
-mpf.plot(ohlc, type="candle", style="charles", title="Goldstein Index Candlestick", ylabel="Goldstein Scale")
+print(ohlc)
 
+mpf.plot(ohlc, type="candle", style="charles", title="Goldstein Index Candlestick", ylabel="Goldstein Scale")
+exit()
 
 # Aggregazione per Paese e ora
 agg = (
