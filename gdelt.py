@@ -31,8 +31,11 @@ GDELT_COLUMNS = [
 # External risk events
 roote=[]
 
-#new root codes
-rcodes = [2,9,10,11,13,15,16,17,18,19,20]
+#new root codes, only threat ones considered
+rcodes = [10,11,12,13,14,15,16,17,18,19,20]
+gov="GOV"
+#new selection of codes
+scodes=[12,16,212,214,232,233,234,243,244,252,253,254,255,256,26,27,28,312,314,32,332,333,334,354,355,356,36,37,38,39,46,50,51,52,53,54,55,56,57,6,60,61,62,63,64,71,72,73,74,75,811,812,813,814,82,83,831,832,833,834,841,85,86,861,862,863,87,871,872,873,874,92,93,94,1012,1014,102,1032,1033,1034,1041,1042,1043,1044,1052,1054,1055,1056,106,107,108,111,1121,1122,1123,1124,1125,113,114,115,116,121,1211,1212,122,1221,1222,1223,1224,123,1231,1232,1233,1234,124,1241,1242,1243,1244,1245,1246,125,126,127,128,129,130,131,1311,1312,1313,132,1321,1322,1323,1324,133,134,135,136,137,138,1381,1382,1383,1384,1385,139,140,141,1411,1412,1413,1414,142,1421,1422,1423,1424,143,1431,1432,1433,1434,144,1441,1442,1443,1444,145,1451,1452,1453,1454,150,151,152,153,154,155,16,160,161,162,1621,1622,1623,163,164,165,166,1661,1662,1663,1712,1721,1722,1723,1724,174,175,176,180,181,182,1821,1822,1823,183,1831,1832,1833,1834,184,185,186,190,191,192,193,194,195,1951,1952,196,200,201,202,203,204,2041,2042]
 
 
 #old codes
@@ -72,6 +75,9 @@ sub = [    #120,190,#test
     19,   # Military clash
     20    # Non-conventional mass violence
 ]
+
+
+
 # --- Load master list ---
 urlmaster="http://data.gdeltproject.org/gdeltv2/masterfilelist.txt"
 master = pd.read_csv(urlmaster, sep=" ", header=None, names=["a", "b", "urls"])
@@ -85,8 +91,13 @@ master["datetime"] = pd.to_datetime(
 master = master.dropna(subset=["datetime"]).drop(columns=["a", "b"])
 
 # --- Date range filter ---
-start_dt = pd.to_datetime("20250910000000", format="%Y%m%d%H%M%S")
-end_dt   = pd.to_datetime("20250922010000", format="%Y%m%d%H%M%S")
+#UK attack heathrow
+#start_dt = pd.to_datetime("20250918000000", format="%Y%m%d%H%M%S")
+#end_dt   = pd.to_datetime("20250923010000", format="%Y%m%d%H%M%S")
+#FR TV5 monde
+start_dt = pd.to_datetime("20150406000000", format="%Y%m%d%H%M%S")
+end_dt   = pd.to_datetime("20150412000000", format="%Y%m%d%H%M%S")
+
 
 master2 = master[master["datetime"].between(start_dt, end_dt)]
 
@@ -119,8 +130,13 @@ for url in master2.urls:
                         
                         #exit()
                         df = df.drop(columns=["SQLDATE", "MonthYear","Year","ActionGeo_FeatureID","FractionDate","Actor1Geo_ADM1Code", "Actor1Geo_ADM2Code", "Actor1Geo_Lat","Actor1Geo_Long","Actor2Geo_ADM1Code", "Actor2Geo_ADM2Code", "Actor2Geo_Lat","Actor2Geo_Long"])
+                        #allow only values less than 0 from goldstein
+                        #df= df[(df['GoldsteinScale'] < 0)]
                         
                         
+                        #filter only GOV types
+                                            
+                        #df=df[(df['Actor1Type1Code'] == "GOV")|(df['Actor2Type1Code'] == "GOV")]
                         
                         #filter for root events
                         
@@ -128,8 +144,9 @@ for url in master2.urls:
                         #df['GeoCountries']  = df["Actor1Geo_CountryCode"]+df["Actor2Geo_CountryCode"]
                         #df=df[df["GeoCountries"].str.contains("UK", na=False)]
                         #filter based on rootcodes instead of codes
-                        df=df[df["EventRootCode"].astype(int).isin(rcodes)]
+                        #df=df[df["EventRootCode"].astype(int).isin(rcodes)]
                         #df=df[df["EventCode"].astype(int).isin(codes)]
+                        df=df[df["EventCode"].astype(int).isin(scodes)]
                         #filter only for relevant CAMEO events
 
                         #df=df[df["EventCode"].astype(int).isin(codes)]
@@ -141,13 +158,15 @@ for url in master2.urls:
 Data = pd.concat(all_dfs, ignore_index=True)
 
 
+#Data=Data[(Data['Actor1Type1Code'] == "GOV") | (Data['Actor2Type1Code'] == "GOV")]
+
 #filter by CAMEO cat
 #Data=Data[Data["EventCode"].astype(int).isin(codes)]
 Data['GeoCountries']  = Data["Actor1Geo_CountryCode"]+"+"+Data["Actor2Geo_CountryCode"]
 Data['Goldstein*diffusion'] = Data["GoldsteinScale"]*(Data["NumMentions"]+Data["NumSources"]+Data["NumArticles"])
 # --- Filter by country ---
 #Data = Data[(Data["GeoCountries"] == "UK") | (Data["GeoCountries"] == "ISLE")]
-Data=Data[Data["GeoCountries"].str.contains("UK", na=False)]
+Data=Data[Data["GeoCountries"].str.contains("FR", na=False)]
 
 #drop duplicates
 Data=Data.drop_duplicates(subset=['SOURCEURL', 'GeoCountries'], keep='last')
@@ -205,7 +224,18 @@ ohlc.index.name = "DATEADDED"  # make sure index is DateTime
 print(ohlc)
 
 mpf.plot(ohlc, type="candle", style="charles", title="Goldstein Index Candlestick", ylabel="Goldstein Scale")
-exit()
+
+#second plottint
+ohlc1 = Data.set_index("DATEADDED")["GoldsteinScale"].resample("D").ohlc()
+ohlc1.index.name = "DATEADDED"  # make sure index is DateTime
+print(ohlc1)
+
+mpf.plot(ohlc1, type="candle", style="charles", title="Goldstein Index Candlestick", ylabel="Goldstein Scale")
+
+
+
+
+
 
 # Aggregazione per Paese e ora
 agg = (
