@@ -6,6 +6,7 @@ import mplfinance as mpf
 import re
 import plotly.express as px
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates 
 
 desk = os.getcwd()
 
@@ -80,7 +81,7 @@ sub = [    #120,190,#test
     20    # Non-conventional mass violence
 ]
 
-
+print("uploading masterlist")
 
 # --- Load master list ---
 urlmaster="http://data.gdeltproject.org/gdeltv2/masterfilelist.txt"
@@ -96,9 +97,10 @@ master = master.dropna(subset=["datetime"]).drop(columns=["a", "b"])
 
 # --- Date range filter ---
 
+print("importing dates")
 
 #UK attack heathrow
-start_dt = pd.to_datetime("20250801000000", format="%Y%m%d%H%M%S")
+start_dt = pd.to_datetime("20250301000000", format="%Y%m%d%H%M%S")
 end_dt   = pd.to_datetime("20250925010000", format="%Y%m%d%H%M%S")
 
 #FR TV5 monde
@@ -128,13 +130,14 @@ path = desk+'/'+Sourcename
 
 # Check whether the specified path exists or not
 isExist = os.path.exists(path)
-print(path)
-print(isExist)
+#print(path)
+#print(isExist)
 
 
 # --- Download & parse files ---
 all_dfs = []
 if isExist is False:
+    print("importing from internet")
     for url in master2.urls:
         try:
             print(f"Downloading {url}")
@@ -196,19 +199,26 @@ if isExist is False:
     Data=Data[Data["EventCode"].astype(int).isin(scodes)]
 #save Dataframe as excel file
 # --- Save to Excel ---
-    print(Data)
-    filename = Path(desk) /f"{Sourcename}"
-    Data.to_excel(filename, index=False, engine="xlsxwriter")
+    #print(Data)
+    count_row = Data.shape[0]
+    if count_row>6000000:
+        df1 = my_dataframe.iloc[:600000,:]
+        df2 = my_dataframe.iloc[600000:1200000,:]
+        df3 = my_dataframe.iloc[1200000:,:]
+        filename1 = Path(desk) /f"{Sourcename}_1"
+        filename1 = Path(desk) /f"{Sourcename}_2"
+        filename1 = Path(desk) /f"{Sourcename}_3"
+        Data.to_excel(filename1, index=False, engine="xlsxwriter", engine_kwargs={'options': {'strings_to_urls': False}})
+        Data.to_excel(filename2, index=False, engine="xlsxwriter",engine_kwargs={'options': {'strings_to_urls': False}})
+        Data.to_excel(filename3, index=False, engine="xlsxwriter",engine_kwargs={'options': {'strings_to_urls': False}})
+    else:
+        filename = Path(desk) /f"{Sourcename}"
+        Data.to_excel(filename, index=False, engine="xlsxwriter", engine_kwargs={'options': {'strings_to_urls': False}})
 else:
-    
+    print("importing from local file")
     Data = pd.read_excel(Sourcename)
 
-
-
-
-
-
-
+print("cleaning data")
 
 #Data=Data[(Data['Actor1Type1Code'] == "GOV") | (Data['Actor2Type1Code'] == "GOV")]
 
@@ -250,46 +260,78 @@ masks = {country: Data['GeoCountries'].str.contains(country, na=False) for count
 axes = plt.gca()
 #print(masks.items())
 
+#3 parameters to measure
+#bilateral for the lowest 5
+#per category of countries
+#overall
+
+print("building averages and plots")
+#masks = {country: Data['GeoCountries'].str.contains(country, na=False) for country in countries}
+
 for country, mask in masks.items():
-    #print(mask)
-    Data.loc[mask, f'{country}_MovingAvg'] = (
-        Data.loc[mask]
-        .set_index('datetime')['AvgTone*NumArticles']
+    subset = Data.loc[mask].copy()
+
+    if subset.empty:
+        print(f"No data for {country}, skipping.")
+        continue
+
+    # Sort by datetime so rolling and plotting work correctly
+    subset = subset.sort_values('datetime')
+
+    # Compute 7-day rolling mean
+    subset[f'{country}_MovingAvg'] = (
+        subset.set_index('datetime')['AvgTone*NumArticles']
         .rolling('7D', min_periods=1)
         .mean()
         .values
     )
-    Data.loc[mask,'Country']=country
 
-        # Create a new figure for each country
-    plt.figure(figsize=(5, 3))
-    
-    # Plot original values
-    plt.plot(Data.loc[mask, 'datetime'], Data.loc[mask, 'AvgTone*NumArticles'], label='AvgTone*NumArticles', alpha=0.7)
-    
-    # Plot moving average
-    plt.plot(Data.loc[mask, 'datetime'], Data.loc[mask, f'{country}_MovingAvg'], label='7D Moving Avg', linewidth=2)
+    # Save the moving avg back into Data (optional, to keep consistency)
+    Data.loc[mask, f'{country}_MovingAvg'] = subset[f'{country}_MovingAvg'].values
+    Data.loc[mask, 'Country'] = country
 
-    plt.title(f"{country} - AvgTone * NumArticles (7D Moving Avg)")
-    plt.xlabel("Date")
-    plt.ylabel("AvgTone * NumArticles")
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-# use plot() method on the dataframe
+    # --- Plot ---
+    fig, ax1 = plt.subplots(figsize=(12, 6))
 
-#for val in countries:
+    # Primary axis (original)
+    ax1.plot(
+        subset['datetime'],
+        subset['AvgTone*NumArticles'],
+        label='Original',
+        color='tab:blue',
+        alpha=0.7
+    )
+    ax1.set_xlabel("Date")
+    ax1.set_ylabel("AvgTone * NumArticles", color='tab:blue')
+    ax1.tick_params(axis='y', labelcolor='tab:blue')
 
-    
+    # Secondary axis (moving avg)
+    ax2 = ax1.twinx()
+    ax2.plot(
+        subset['datetime'],
+        subset[f'{country}_MovingAvg'],
+        label='7D Moving Avg',
+        color='tab:red',
+        linewidth=2
+    )
+    ax2.set_ylabel("7D Moving Avg", color='tab:red')
+    ax2.tick_params(axis='y', labelcolor='tab:red')
 
-#Data.plot()
-# Trasformazioni log(1+x) sulle metriche di diffusione
-#Data["M"] = np.log1p(Data["NumMentions"])
-#Data["S"] = np.log1p(Data["NumSources"])
-#Data["A"] = np.log1p(Data["NumArticles"])
+    # --- Ensure full date range and proper tick spacing ---
+    ax1.set_xlim(subset['datetime'].min(), subset['datetime'].max())  # full X range
+    ax1.xaxis.set_major_locator(mdates.AutoDateLocator())             # smart tick spacing
+    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))   # readable format
+    plt.xticks(rotation=45, ha='right')
 
-# Fattore di diffusione
-#Data["D"] = Data["M"] + Data["S"] + Data["A"]
+    # Combine legends
+    lines_1, labels_1 = ax1.get_legend_handles_labels()
+    lines_2, labels_2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='best')
+
+    # Title, grid, layout
+    plt.title(f"{country} — AvgTone * NumArticles vs 7D Moving Avg")
+    ax1.grid(True, linestyle='--', alpha=0.6)
+    fig.tight_layout()
 
 # Gravità conflittuale (solo eventi negativi)
 Data["C"] = Data["GoldsteinScale"].apply(lambda x: max(0, -x))
@@ -297,12 +339,6 @@ Data["C"] = Data["GoldsteinScale"].apply(lambda x: max(0, -x))
 
 # Contributo di rischio per evento
 Data["EventRiskNegative*Numarticles"] = Data["C"] * Data["NumArticles"]
-#consider also positive events
-#Data["EventRiskAll"] = Data["GoldsteinScale"] * Data["D"]
-
-#Data["DATEADDED"] = pd.to_datetime(Data["DATEADDED"], errors="coerce")
-#Data = Data.dropna(subset=["DATEADDED"])
-#Data = Data[Data['C'] > 0]
 
 
 # --- Save to Excel ---
@@ -312,7 +348,43 @@ Data.to_excel(filename, index=False, engine="xlsxwriter")
 
 print(f"Saved {len(Data)} rows -> {filename}")
 
+
 plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+
+# Trasformazioni log(1+x) sulle metriche di diffusione
+#Data["M"] = np.log1p(Data["NumMentions"])
+#Data["S"] = np.log1p(Data["NumSources"])
+#Data["A"] = np.log1p(Data["NumArticles"])
+
+# Fattore di diffusione
+#Data["D"] = Data["M"] + Data["S"] + Data["A"]
+
+
+
+
+
+#consider also positive events
+#Data["EventRiskAll"] = Data["GoldsteinScale"] * Data["D"]
+
+#Data["DATEADDED"] = pd.to_datetime(Data["DATEADDED"], errors="coerce")
+#Data = Data.dropna(subset=["DATEADDED"])
+#Data = Data[Data['C'] > 0]
+
+
 
 
 
