@@ -40,7 +40,7 @@ rcodes = [10,11,12,13,14,15,16,17,18,19,20]
 gov="GOV"
 #new selection of codes
 #scodes=[12,16,212,214,232,233,234,243,244,252,253,254,255,256,26,27,28,312,314,32,332,333,334,354,355,356,36,37,38,39,46,50,51,52,53,54,55,56,57,6,60,61,62,63,64,71,72,73,74,75,811,812,813,814,82,83,831,832,833,834,841,85,86,861,862,863,87,871,872,873,874,92,93,94,1012,1014,102,1032,1033,1034,1041,1042,1043,1044,1052,1054,1055,1056,106,107,108,111,1121,1122,1123,1124,1125,113,114,115,116,121,1211,1212,122,1221,1222,1223,1224,123,1231,1232,1233,1234,124,1241,1242,1243,1244,1245,1246,125,126,127,128,129,130,131,1311,1312,1313,132,1321,1322,1323,1324,133,134,135,136,137,138,1381,1382,1383,1384,1385,139,140,141,1411,1412,1413,1414,142,1421,1422,1423,1424,143,1431,1432,1433,1434,144,1441,1442,1443,1444,145,1451,1452,1453,1454,150,151,152,153,154,155,16,160,161,162,1621,1622,1623,163,164,165,166,1661,1662,1663,1712,1721,1722,1723,1724,174,175,176,180,181,182,1821,1822,1823,183,1831,1832,1833,1834,184,185,186,190,191,192,193,194,195,1951,1952,196,200,201,202,203,204,2041,2042]
-scodes=[212,214,232,234,256,312,314,32,332,334,356,62,72,74,87,872,873,874,93,94,1012,1014,1032,1033,1034,1056,111,1122,1123,1124,1125,114,121,1211,1212,122,1221,1222,1223,1224,123,1231,1232,1233,1234,124,1241,1242,1243,1244,1245,1246,125,126,127,128,129,130,131,1311,1312,1313,132,1321,1322,1323,1324,133,134,135,136,137,138,1381,1382,1383,1384,1385,139,145,1451,1452,1453,1454,150,151,152,153,154,155,16,160,161,162,1621,1622,1623,164,165,166,1661,1662,1663,1712,1721,1722,1723,1724,174,175,176,180,181,182,1821,1822,1823,183,1831,1832,1833,1834,184,185,186,191,192,193,194,195,1951,1952,196,200,201,202,203,204,2041,2042]
+scodes=[212,214,232,234,256,312,314,32,332,334,356,62,72,74,87,872,873,874,93,94,1012,1014,1032,1033,1034,1056,111,1122,1123,1124,1125,114,121,1211,1212,122,1221,1222,1223,1224,123,1231,1232,1233,1234,124,1241,1242,1243,1244,1245,1246,125,126,127,128,129,130,131,1311,1312,1313,132,1321,1322,1323,1324,133,134,135,136,137,138,1381,1382,1383,1384,1385,139,145,1451,1452,1453,1454,150,151,152,153,154,155,16,160,161,162,1621,1622,1623,164,165,166,1661,1662,1663,1712,1721,1722,1723,1724,174,175,176,180,181,182,1821,1822,1823,183,1831,1832,1833,1834,184,185,186,190,191,192,193,194,195,1951,1952,196,200,201,202,203,204,2041,2042]
 
 
 #old codes
@@ -81,35 +81,22 @@ sub = [    #120,190,#test
     20    # Non-conventional mass violence
 ]
 
-print("uploading masterlist")
-
-# --- Load master list ---
-urlmaster="http://data.gdeltproject.org/gdeltv2/masterfilelist.txt"
-master = pd.read_csv(urlmaster, sep=" ", header=None, names=["a", "b", "urls"])
-
-master["datetime"] = pd.to_datetime(
-    master["urls"].str.extract(r"(\d{14})(?=\.export)")[0],
-    format="%Y%m%d%H%M%S",
-    errors="coerce"
-)
-
-master = master.dropna(subset=["datetime"]).drop(columns=["a", "b"])
 
 # --- Date range filter ---
 
 print("importing dates")
 
 #UK attack heathrow
-start_dt = pd.to_datetime("20250301000000", format="%Y%m%d%H%M%S")
-end_dt   = pd.to_datetime("20250925010000", format="%Y%m%d%H%M%S")
+start_dt = pd.to_datetime("20250801000000", format="%Y%m%d%H%M%S")
+end_dt = pd.to_datetime("20250925010000", format="%Y%m%d%H%M%S")
 
 #FR TV5 monde
 #start_dt = pd.to_datetime("20150301000000", format="%Y%m%d%H%M%S")
-#end_dt   = pd.to_datetime("20150413010000", format="%Y%m%d%H%M%S")
+#end_dt   = pd.to_datetime("20150414010000", format="%Y%m%d%H%M%S")
 
 #test
-start_dt = pd.to_datetime("20250922000000", format="%Y%m%d%H%M%S")
-end_dt   = pd.to_datetime("20250923010000", format="%Y%m%d%H%M%S")
+#start_dt = pd.to_datetime("20250918000000", format="%Y%m%d%H%M%S")
+#end_dt   = pd.to_datetime("20250925010000", format="%Y%m%d%H%M%S")
 
 
 
@@ -119,7 +106,7 @@ Sourcename=Sourcename.replace(":","")
 #Sourcename = re.sub(r"\s+", "", Sourcename, flags=re.UNICODE)
 #Sourcename = re.sub(r"\s+", "", Sourcename, flags=re.UNICODE)
 
-master2 = master[master["datetime"].between(start_dt, end_dt)]
+
 
 
 #check if table is already available
@@ -134,10 +121,27 @@ isExist = os.path.exists(path)
 #print(isExist)
 
 
+
 # --- Download & parse files ---
 all_dfs = []
 if isExist is False:
+
     print("importing from internet")
+# --- Load master list ---
+    urlmaster="http://data.gdeltproject.org/gdeltv2/masterfilelist.txt"
+
+
+    master = pd.read_csv(urlmaster, sep=" ", header=None, names=["a", "b", "urls"])
+
+    master["datetime"] = pd.to_datetime(
+        master["urls"].str.extract(r"(\d{14})(?=\.export)")[0],
+        format="%Y%m%d%H%M%S",
+        errors="coerce"
+    )
+
+    master = master.dropna(subset=["datetime"]).drop(columns=["a", "b"])
+    master2 = master[master["datetime"].between(start_dt, end_dt)]
+    
     for url in master2.urls:
         try:
             print(f"Downloading {url}")
@@ -218,8 +222,8 @@ else:
     print("importing from local file")
     Data = pd.read_excel(Sourcename)
 
-print("cleaning data")
-
+print("Import complted. Cleaning data")
+#exit()
 #Data=Data[(Data['Actor1Type1Code'] == "GOV") | (Data['Actor2Type1Code'] == "GOV")]
 
 
@@ -254,7 +258,11 @@ Data["AvgTone*NumArticles"] = Data["AvgTone"] * Data["NumArticles"]
 Data = Data.sort_values('datetime')
 
 #apply moving averages
-countries = ['FR', 'UK', 'US']
+countries = ['UK']
+#calculate counterparts based on the provided list. Remember that overlaps will take the value of the last entry in the countries list
+for country in countries:
+    Data['Counterpart'] = np.where(Data['Actor1Geo_CountryCode'] == country, Data['Actor2Geo_CountryCode'], Data['Actor1Geo_CountryCode'])
+    Data['Counterpart'] = np.where(Data['Actor2Geo_CountryCode'] == country, Data['Actor1Geo_CountryCode'], Data['Actor2Geo_CountryCode'])
 
 masks = {country: Data['GeoCountries'].str.contains(country, na=False) for country in countries}
 axes = plt.gca()
@@ -266,72 +274,165 @@ axes = plt.gca()
 #overall
 
 print("building averages and plots")
-#masks = {country: Data['GeoCountries'].str.contains(country, na=False) for country in countries}
 
+
+#mask data for selected countries
 for country, mask in masks.items():
+    Data.loc[mask, 'Country'] = country
     subset = Data.loc[mask].copy()
-
+    
     if subset.empty:
         print(f"No data for {country}, skipping.")
         continue
 
     # Sort by datetime so rolling and plotting work correctly
     subset = subset.sort_values('datetime')
+    #write the country of reference that was masked for future usage
+    
+    #extract unique counterparts and create a mask
+    counterparts=subset["Counterpart"].unique()
+    #masks = {country: Data['GeoCountries'].str.contains(country, na=False) for country in countries}
+    MaskCounterparts = {counterpart: subset['Counterpart'].str.contains(counterpart, na=False) for counterpart in counterparts}
+    #(df[(df['state'] == 'NY') | (df['state'] == 'TX')])
+    
+    
+    for counterpart in counterparts:
+        CounterpartDF=subset[(subset['Country'].str.contains(country, na=False) | subset['Counterpart'].str.contains(counterpart, na=False))]
+        #subset2 = np.where((Data['Country'].str==country) & (Data['Counterpart'].str==counterpart))
+        #subset2=Data.loc[MaskCounterparts].copy()
+        
+        if CounterpartDF.empty:
+            print(f"No data for {counterpart}, skipping.")
+            continue
+        print(CounterpartDF)
+        exit()
+        # Compute 1-day rolling mean
+        subset[f'{counterpart}_MovingAvg'] = (
+            subset.set_index('datetime')['GoldsteinScale']
+            .rolling('1D', min_periods=1)
+            .mean()
+            .values
+        )
+        # Compute 7-day rolling mean
+        subset[f'{counterpart}_7DMovingAvg'] = (
+            subset.set_index('datetime')['AvgTone*NumArticles']
+            .rolling('7D', min_periods=10)
+            .mean()
+            .values
+        )
+        
+            # Compute 1M rolling mean
+        subset[f'{counterpart}_1MMovingAvg'] = (
+            subset.set_index('datetime')['AvgTone*NumArticles']
+            .rolling('30D', min_periods=50)
+            .mean()
+            .values
+        )
+            # Compute 1-day rolling mean on  tone only
+        subset[f'{counterpart}_1DMovingAvgTone'] = (
+            subset.set_index('datetime')['AvgTone']
+            .rolling('1D', min_periods=1)
+            .mean()
+            .values
+        )
+        
+        
 
-    # Compute 7-day rolling mean
-    subset[f'{country}_MovingAvg'] = (
-        subset.set_index('datetime')['AvgTone*NumArticles']
-        .rolling('7D', min_periods=1)
-        .mean()
-        .values
-    )
+        # Save the moving avg back into Data (optional, to keep consistency)
+        Data.loc[MaskCounterparts, f'{country}_MovingAvg'] = subset[f'{country}_MovingAvg'].values
+        #saving this mask's country as first reference point 
+        Data.loc[MaskCounterparts, 'Country'] = country
+        #Data.loc[mask, 'Counterpart'] = np.where(Data['Actor1Geo_CountryCode'] == country, df['col2'], df['col1'])
+        
+        
+        #mask2 = Data['Actor1Geo_CountryCode'].str.contains(country, na=False)
+        #subset2=Data.loc[mask2].copy()
+        #Data.loc[mask2, 'Counterpart'] = mask2['Actor2Geo_CountryCode']
+        #mask2 = Data['Actor2Geo_CountryCode'].str.contains(country, na=False)
+        #subset2=Data.loc[mask2].copy()
+        #Data.loc[mask2, 'Counterpart'] = mask2['Actor1Geo_CountryCode']
+    #    print(subset2)
+    #    exit()
+        #column_name = 'my_channel'
+        #df.loc[mask, column_name] = 0
+        #mask2 = Data['GeoCountries'].str.contains(country, na=False) for country in countries}
+        
+        #mask = df.my_channel > 20000
+        #column_name = 'my_channel'
+        #df.loc[mask, column_name] = 0
 
-    # Save the moving avg back into Data (optional, to keep consistency)
-    Data.loc[mask, f'{country}_MovingAvg'] = subset[f'{country}_MovingAvg'].values
-    Data.loc[mask, 'Country'] = country
+        # --- Plot ---
+        fig, ax1 = plt.subplots(figsize=(12, 6))
 
-    # --- Plot ---
-    fig, ax1 = plt.subplots(figsize=(12, 6))
+        # Primary axis (original)
+        ax1.plot(
+            subset['datetime'],
+            subset[f'{counterpart}_1DMovingAvgTone'],
+            label='_1DMovingAvgTone',
+            color='tab:blue',
+            alpha=0.7
+        )
+        ax1.set_xlabel("Date")
+        ax1.set_ylabel("1DMovingAvgTone", color='tab:blue')
+        ax1.tick_params(axis='y', labelcolor='tab:blue')
 
-    # Primary axis (original)
-    ax1.plot(
-        subset['datetime'],
-        subset['AvgTone*NumArticles'],
-        label='Original',
-        color='tab:blue',
-        alpha=0.7
-    )
-    ax1.set_xlabel("Date")
-    ax1.set_ylabel("AvgTone * NumArticles", color='tab:blue')
-    ax1.tick_params(axis='y', labelcolor='tab:blue')
+        # Secondary axis (1D moving avg Tone*Num)
+        ax2 = ax1.twinx()
+        ax2.plot(
+            subset['datetime'],
+            subset[f'{counterpart}_MovingAvg'],
+            label='1D Moving Avg',
+            color='tab:red',
+            linewidth=2
+        )
+        ax2.set_ylabel("1D Moving Avg", color='tab:red')
+        ax2.tick_params(axis='y', labelcolor='tab:red')
+        
+        
+            # 3 axis (7D moving avg)
+        ax3 = ax1.twinx()
+        ax3.plot(
+            subset['datetime'],
+            subset[f'{counterpart}_7DMovingAvg'],
+            label='7D Moving Avg',
+            color='tab:green',
+            linewidth=1
+        )
+        ax3.set_ylabel("7D Moving Avg", color='tab:green')
+        ax3.tick_params(axis='y', labelcolor='tab:green')
+        
+        # 4 axis (1 M moving avg)
+        
+        ax4 = ax1.twinx()
+        ax4.plot(
+            subset['datetime'],
+            subset[f'{counterpart}_1MMovingAvg'],
+            label='1M Moving Avg',
+            color='tab:pink',
+            linewidth=1
+        )
+        ax4.set_ylabel("1M Moving Avg", color='tab:pink')
+        ax4.tick_params(axis='y', labelcolor='tab:pink')
+        
+        
 
-    # Secondary axis (moving avg)
-    ax2 = ax1.twinx()
-    ax2.plot(
-        subset['datetime'],
-        subset[f'{country}_MovingAvg'],
-        label='7D Moving Avg',
-        color='tab:red',
-        linewidth=2
-    )
-    ax2.set_ylabel("7D Moving Avg", color='tab:red')
-    ax2.tick_params(axis='y', labelcolor='tab:red')
+        # --- Ensure full date range and proper tick spacing ---
+        ax1.set_xlim(subset['datetime'].min(), subset['datetime'].max())  # full X range
+        ax1.xaxis.set_major_locator(mdates.AutoDateLocator())             # smart tick spacing
+        ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))   # readable format
+        plt.xticks(rotation=45, ha='right')
 
-    # --- Ensure full date range and proper tick spacing ---
-    ax1.set_xlim(subset['datetime'].min(), subset['datetime'].max())  # full X range
-    ax1.xaxis.set_major_locator(mdates.AutoDateLocator())             # smart tick spacing
-    ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))   # readable format
-    plt.xticks(rotation=45, ha='right')
+        # Combine legends
+        lines_1, labels_1 = ax1.get_legend_handles_labels()
+        lines_2, labels_2 = ax2.get_legend_handles_labels()
+        lines_3, labels_3 = ax3.get_legend_handles_labels()
+        lines_4, labels_4 = ax4.get_legend_handles_labels()
+        ax1.legend(lines_1 + lines_2+lines_3+lines_4, labels_1 + labels_2+labels_3+labels_4, loc='best')
 
-    # Combine legends
-    lines_1, labels_1 = ax1.get_legend_handles_labels()
-    lines_2, labels_2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='best')
-
-    # Title, grid, layout
-    plt.title(f"{country} — AvgTone * NumArticles vs 7D Moving Avg")
-    ax1.grid(True, linestyle='--', alpha=0.6)
-    fig.tight_layout()
+        # Title, grid, layout
+        plt.title(f"{country} — AvgTone * NumArticles vs 7D Moving Avg")
+        ax1.grid(True, linestyle='--', alpha=0.6)
+        fig.tight_layout()
 
 # Gravità conflittuale (solo eventi negativi)
 Data["C"] = Data["GoldsteinScale"].apply(lambda x: max(0, -x))
