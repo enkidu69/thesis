@@ -4,6 +4,8 @@ from pathlib import Path
 import numpy as np
 import mplfinance as mpf
 import re
+import plotly.express as px
+import matplotlib.pyplot as plt
 
 desk = os.getcwd()
 
@@ -96,8 +98,8 @@ master = master.dropna(subset=["datetime"]).drop(columns=["a", "b"])
 
 
 #UK attack heathrow
-start_dt = pd.to_datetime("20250922000000", format="%Y%m%d%H%M%S")
-end_dt   = pd.to_datetime("20250923010000", format="%Y%m%d%H%M%S")
+start_dt = pd.to_datetime("20250801000000", format="%Y%m%d%H%M%S")
+end_dt   = pd.to_datetime("20250925010000", format="%Y%m%d%H%M%S")
 
 #FR TV5 monde
 #start_dt = pd.to_datetime("20150301000000", format="%Y%m%d%H%M%S")
@@ -242,11 +244,14 @@ Data["AvgTone*NumArticles"] = Data["AvgTone"] * Data["NumArticles"]
 Data = Data.sort_values('datetime')
 
 #apply moving averages
-countries = ['FR', 'UK']
+countries = ['FR', 'UK', 'US']
 
 masks = {country: Data['GeoCountries'].str.contains(country, na=False) for country in countries}
+axes = plt.gca()
+#print(masks.items())
 
 for country, mask in masks.items():
+    #print(mask)
     Data.loc[mask, f'{country}_MovingAvg'] = (
         Data.loc[mask]
         .set_index('datetime')['AvgTone*NumArticles']
@@ -254,34 +259,50 @@ for country, mask in masks.items():
         .mean()
         .values
     )
+    Data.loc[mask,'Country']=country
 
-# --- Save to Excel ---
-random_str = "".join(random.choices(string.ascii_letters + string.digits, k=8))
-filename = Path(desk) /f"gdelt_1_{random_str}.xlsx"
-Data.to_excel(filename, index=False, engine="xlsxwriter")
+        # Create a new figure for each country
+    plt.figure(figsize=(5, 3))
+    
+    # Plot original values
+    plt.plot(Data.loc[mask, 'datetime'], Data.loc[mask, 'AvgTone*NumArticles'], label='AvgTone*NumArticles', alpha=0.7)
+    
+    # Plot moving average
+    plt.plot(Data.loc[mask, 'datetime'], Data.loc[mask, f'{country}_MovingAvg'], label='7D Moving Avg', linewidth=2)
 
-print(f"Saved {len(Data)} rows -> {filename}")
+    plt.title(f"{country} - AvgTone * NumArticles (7D Moving Avg)")
+    plt.xlabel("Date")
+    plt.ylabel("AvgTone * NumArticles")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+# use plot() method on the dataframe
 
+#for val in countries:
+
+    
+
+#Data.plot()
 # Trasformazioni log(1+x) sulle metriche di diffusione
-Data["M"] = np.log1p(Data["NumMentions"])
-Data["S"] = np.log1p(Data["NumSources"])
-Data["A"] = np.log1p(Data["NumArticles"])
+#Data["M"] = np.log1p(Data["NumMentions"])
+#Data["S"] = np.log1p(Data["NumSources"])
+#Data["A"] = np.log1p(Data["NumArticles"])
 
 # Fattore di diffusione
-Data["D"] = Data["M"] + Data["S"] + Data["A"]
+#Data["D"] = Data["M"] + Data["S"] + Data["A"]
 
 # Gravità conflittuale (solo eventi negativi)
 Data["C"] = Data["GoldsteinScale"].apply(lambda x: max(0, -x))
 
 
 # Contributo di rischio per evento
-Data["EventRiskNegative"] = Data["C"] * Data["D"]
+Data["EventRiskNegative*Numarticles"] = Data["C"] * Data["NumArticles"]
 #consider also positive events
-Data["EventRiskAll"] = Data["GoldsteinScale"] * Data["D"]
+#Data["EventRiskAll"] = Data["GoldsteinScale"] * Data["D"]
 
-Data["DATEADDED"] = pd.to_datetime(Data["DATEADDED"], errors="coerce")
-Data = Data.dropna(subset=["DATEADDED"])
-Data = Data[Data['C'] > 0]
+#Data["DATEADDED"] = pd.to_datetime(Data["DATEADDED"], errors="coerce")
+#Data = Data.dropna(subset=["DATEADDED"])
+#Data = Data[Data['C'] > 0]
 
 
 # --- Save to Excel ---
@@ -291,23 +312,27 @@ Data.to_excel(filename, index=False, engine="xlsxwriter")
 
 print(f"Saved {len(Data)} rows -> {filename}")
 
+plt.show()
+
+
+
 
 #plotting as financial 
 #need for a cumulated
 
 
-ohlc = Data.set_index("DATEADDED")["EventRiskAll"].resample("D").ohlc()
-ohlc.index.name = "DATEADDED"  # make sure index is DateTime
-print(ohlc)
+#ohlc = Data.set_index("DATEADDED")["EventRiskAll"].resample("D").ohlc()
+#ohlc.index.name = "DATEADDED"  # make sure index is DateTime
+#print(ohlc)
 
-mpf.plot(ohlc, type="candle", style="charles", title="Goldstein Index Candlestick", ylabel="Goldstein Scale")
+#mpf.plot(ohlc, type="candle", style="charles", title="Goldstein Index Candlestick", ylabel="Goldstein Scale")
 
 #second plottint
-ohlc1 = Data.set_index("DATEADDED")["GoldsteinScale"].resample("D").ohlc()
-ohlc1.index.name = "DATEADDED"  # make sure index is DateTime
-print(ohlc1)
+#ohlc1 = Data.set_index("DATEADDED")["GoldsteinScale"].resample("D").ohlc()
+#ohlc1.index.name = "DATEADDED"  # make sure index is DateTime
+#print(ohlc1)
 
-mpf.plot(ohlc1, type="candle", style="charles", title="Goldstein Index Candlestick", ylabel="Goldstein Scale")
+#mpf.plot(ohlc1, type="candle", style="charles", title="Goldstein Index Candlestick", ylabel="Goldstein Scale")
 
 
 
@@ -315,22 +340,22 @@ mpf.plot(ohlc1, type="candle", style="charles", title="Goldstein Index Candlesti
 
 
 # Aggregazione per Paese e ora
-agg = (
-    Data.groupby(["ActionGeo_CountryCode", "hour"])
-    .agg(
-        RawRisk=("EventRiskNegative", "sum"),
-        MediaVol=("NumArticles", "sum"),
-        Events=("EventRiskNegative", "count")
-    )
-    .reset_index()
-)
+#agg = (
+#    Data.groupby(["ActionGeo_CountryCode", "hour"])
+#    .agg(
+#        RawRisk=("EventRiskNegative", "sum"),
+#        MediaVol=("NumArticles", "sum"),
+#        Events=("EventRiskNegative", "count")
+#    )
+#    .reset_index()
+#)
 
 # Normalizzazione rischio per volume mediale
-agg["Index"] = agg["RawRisk"] / (agg["MediaVol"] + 1)
-
+#agg["Index"] = agg["RawRisk"] / (agg["MediaVol"] + 1)
+#
 # Standardizzazione z-score (rispetto a tutto il dataset)
-agg["Index_zscore"] = (agg["Index"] - agg["Index"].mean()) / agg["Index"].std()
+#agg["Index_zscore"] = (agg["Index"] - agg["Index"].mean()) / agg["Index"].std()
 
 # Risultati
-print(agg.head(20))
+#print(agg.head(20))
 
