@@ -7,6 +7,7 @@ import re
 import plotly.express as px
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates 
+from matplotlib.backends.backend_pdf import PdfPages
 
 desk = os.getcwd()
 
@@ -34,6 +35,7 @@ GDELT_COLUMNS = [
 
 # External risk events
 roote=[]
+random_str = "".join(random.choices(string.ascii_letters + string.digits, k=8))
 
 #new root codes, only threat ones considered
 rcodes = [10,11,12,13,14,15,16,17,18,19,20]
@@ -258,7 +260,7 @@ Data["AvgTone*NumArticles"] = Data["AvgTone"] * Data["NumArticles"]
 Data = Data.sort_values('datetime')
 
 #apply moving averages
-countries = ['UK']
+countries = ['UK','FR']
 #calculate counterparts based on the provided list. Remember that overlaps will take the value of the last entry in the countries list
 for country in countries:
     Data['Counterpart'] = np.where(Data['Actor1Geo_CountryCode'] == country, Data['Actor2Geo_CountryCode'], Data['Actor1Geo_CountryCode'])
@@ -277,155 +279,141 @@ print("building averages and plots")
 f = plt.figure()
 
 
-#mask data for selected countries
-for country, mask in masks.items():
-    Data.loc[mask, 'Country'] = country
-    subset = Data.loc[mask].copy()
-    
-    if subset.empty:
-        print(f"No data for {country}, skipping.")
-        continue
-    #saving this mask's country as first reference point 
-    Data.loc[mask, 'Country'] = country
-    # Sort by datetime so rolling and plotting work correctly
-    subset = subset.sort_values('datetime')
-    #write the country of reference that was masked for future usage
-    
-    #extract unique counterparts and create a mask
-    counterparts=subset["Counterpart"].unique()
-    #masks = {country: Data['GeoCountries'].str.contains(country, na=False) for country in countries}
-    MaskCounterparts = {counterpart: subset['Counterpart'].str.contains(counterpart, na=False) for counterpart in counterparts}
-    #(df[(df['state'] == 'NY') | (df['state'] == 'TX')])
-    
-    
-    for counterpart in counterparts:
-        print("processing "+country+" "+counterpart)
-        CounterpartDF=subset[(subset['Country'].str.contains(country, na=False) & subset['Counterpart'].str.contains(counterpart, na=False))]
-        print(CounterpartDF)
-        exit()
-        #subset2 = np.where((Data['Country'].str==country) & (Data['Counterpart'].str==counterpart))
-        #subset2=Data.loc[MaskCounterparts].copy()
+# <--- 2. OPEN THE PDF FILE (use 'with' to auto-close)
+with PdfPages('all_plots'+{random_str}+'.pdf') as pdf:
+    for country, mask in masks.items():
+        Data.loc[mask, 'Country'] = country
+        subset = Data.loc[mask].copy()
         
-        if CounterpartDF.empty:
-            print(f"No data for {counterpart}, skipping.")
+        if subset.empty:
+            print(f"No data for {country}, skipping.")
             continue
-        #print(CounterpartDF)
         
+        subset = subset.sort_values('datetime')
+        counterparts = subset["Counterpart"].unique()
         
-#########################CALCULATIONS of moving averages
-        # Compute 1-day rolling mean
-        CounterpartDF[f'{counterpart}_MovingAvg'] = (
-            CounterpartDF.set_index('datetime')['GoldsteinScale']
-            .rolling('1D', min_periods=1)
-            .mean()
-            .values
-        )
-        # Compute 7-day rolling mean
-        CounterpartDF[f'{counterpart}_7DMovingAvg'] = (
-            CounterpartDF.set_index('datetime')['AvgTone*NumArticles']
-            .rolling('7D', min_periods=10)
-            .mean()
-            .values
-        )
-        
-            # Compute 1M rolling mean
-        CounterpartDF[f'{counterpart}_1MMovingAvg'] = (
-            CounterpartDF.set_index('datetime')['AvgTone*NumArticles']
-            .rolling('30D', min_periods=50)
-            .mean()
-            .values
-        )
-            # Compute 1-day rolling mean on  tone only
-        CounterpartDF[f'{counterpart}_1DMovingAvgTone'] = (
-            CounterpartDF.set_index('datetime')['AvgTone']
-            .rolling('1D', min_periods=1)
-            .mean()
-            .values
-        )
-        
-            # Save the 1DAY moving avg per couple country-counterpart back into Data (optional, to keep consistency)
+        for counterpart in counterparts:
+            print("processing " + country + " " + counterpart)
+            CounterpartDF = subset[(subset['Country'].str.contains(country, na=False) & subset['Counterpart'].str.contains(counterpart, na=False))].copy() # Use .copy() to avoid SettingWithCopyWarning
+            
+            # print(CounterpartDF)
+            # exit()  # <--- REMOVE THIS! This was stopping your script.
 
-        #Data.loc[CounterpartDF, f'{counterpart}_MovingAvg'] = CounterpartDF[f'{counterpart}_MovingAvg'].values
+            if CounterpartDF.empty:
+                print(f"No data for {counterpart}, skipping.")
+                continue
 
+            # --- CALCULATIONS ---
+            # Set index once for efficiency
+            CounterpartDF_indexed = CounterpartDF.set_index('datetime')
+            
+            CounterpartDF[f'{counterpart}_MovingAvg'] = (
+                CounterpartDF_indexed['GoldsteinScale']
+                .rolling('1D', min_periods=1)
+                .mean()
+                .values
+            )
+            CounterpartDF[f'{counterpart}_7DMovingAvg'] = (
+                CounterpartDF_indexed['AvgTone*NumArticles']
+                .rolling('7D', min_periods=10)
+                .mean()
+                .values
+            )
+            CounterpartDF[f'{counterpart}_1MMovingAvg'] = (
+                CounterpartDF_indexed['AvgTone*NumArticles']
+                .rolling('30D', min_periods=50)
+                .mean()
+                .values
+            )
+            CounterpartDF[f'{counterpart}_1DMovingAvgTone'] = (
+                CounterpartDF_indexed['AvgTone']
+                .rolling('1D', min_periods=1)
+                .mean()
+                .values
+            )
 
-        
-        
+            # --- Plot ---
+            fig, ax1 = plt.subplots(figsize=(12, 6))
 
+            # Primary axis (ax1)
+            ax1.plot(
+                CounterpartDF['datetime'],
+                CounterpartDF[f'{counterpart}_1DMovingAvgTone'],
+                label='_1DMovingAvgTone',
+                color='tab:blue',
+                alpha=0.7
+            )
+            ax1.set_xlabel("Date")
+            ax1.set_ylabel("1DMovingAvgTone", color='tab:blue')
+            ax1.tick_params(axis='y', labelcolor='tab:blue')
 
-        # --- Plot ---
-        fig, ax1 = plt.subplots(figsize=(12, 6))
+            # Secondary axis (ax2)
+            ax2 = ax1.twinx()
+            ax2.plot(
+                CounterpartDF['datetime'],
+                CounterpartDF[f'{counterpart}_MovingAvg'],
+                label='1D Moving Avg',
+                color='tab:red',
+                linewidth=2
+            )
+            ax2.set_ylabel("1D Moving Avg (Goldstein)", color='tab:red') # Added (Goldstein) for clarity
+            ax2.tick_params(axis='y', labelcolor='tab:red')
+            
+            # 3rd axis (ax3)
+            ax3 = ax1.twinx()
+            # <--- FIX: Offset the 3rd axis spine
+            ax3.spines['right'].set_position(('outward', 60)) 
+            ax3.plot(
+                CounterpartDF['datetime'],
+                CounterpartDF[f'{counterpart}_7DMovingAvg'],
+                label='7D Moving Avg',
+                color='tab:green',
+                linewidth=1
+            )
+            ax3.set_ylabel("7D Moving Avg", color='tab:green')
+            ax3.tick_params(axis='y', labelcolor='tab:green')
+            
+            # 4th axis (ax4)
+            ax4 = ax1.twinx()
+            # <--- FIX: Offset the 4th axis spine
+            ax4.spines['right'].set_position(('outward', 120)) 
+            ax4.plot(
+                CounterpartDF['datetime'],
+                CounterpartDF[f'{counterpart}_1MMovingAvg'],
+                label='1M Moving Avg',
+                color='tab:pink',
+                linewidth=1
+            )
+            ax4.set_ylabel("1M Moving Avg", color='tab:pink')
+            ax4.tick_params(axis='y', labelcolor='tab:pink')
 
-        # Primary axis (original)
-        ax1.plot(
-            CounterpartDF['datetime'],
-            CounterpartDF[f'{counterpart}_1DMovingAvgTone'],
-            label='_1DMovingAvgTone',
-            color='tab:blue',
-            alpha=0.7
-        )
-        ax1.set_xlabel("Date")
-        ax1.set_ylabel("1DMovingAvgTone", color='tab:blue')
-        ax1.tick_params(axis='y', labelcolor='tab:blue')
+            # --- Date axis formatting ---
+            ax1.set_xlim(subset['datetime'].min(), subset['datetime'].max())
+            ax1.xaxis.set_major_locator(mdates.AutoDateLocator())
+            ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+            plt.xticks(rotation=45, ha='right')
 
-        # Secondary axis (1D moving avg Tone*Num)
-        ax2 = ax1.twinx()
-        ax2.plot(
-            CounterpartDF['datetime'],
-            CounterpartDF[f'{counterpart}_MovingAvg'],
-            label='1D Moving Avg',
-            color='tab:red',
-            linewidth=2
-        )
-        ax2.set_ylabel("1D Moving Avg", color='tab:red')
-        ax2.tick_params(axis='y', labelcolor='tab:red')
-        
-        
-            # 3 axis (7D moving avg)
-        ax3 = ax1.twinx()
-        ax3.plot(
-            CounterpartDF['datetime'],
-            CounterpartDF[f'{counterpart}_7DMovingAvg'],
-            label='7D Moving Avg',
-            color='tab:green',
-            linewidth=1
-        )
-        ax3.set_ylabel("7D Moving Avg", color='tab:green')
-        ax3.tick_params(axis='y', labelcolor='tab:green')
-        
-        # 4 axis (1 M moving avg)
-        
-        ax4 = ax1.twinx()
-        ax4.plot(
-            CounterpartDF['datetime'],
-            CounterpartDF[f'{counterpart}_1MMovingAvg'],
-            label='1M Moving Avg',
-            color='tab:pink',
-            linewidth=1
-        )
-        ax4.set_ylabel("1M Moving Avg", color='tab:pink')
-        ax4.tick_params(axis='y', labelcolor='tab:pink')
-        
-        
+            # Combine legends
+            lines_1, labels_1 = ax1.get_legend_handles_labels()
+            lines_2, labels_2 = ax2.get_legend_handles_labels()
+            lines_3, labels_3 = ax3.get_legend_handles_labels()
+            lines_4, labels_4 = ax4.get_legend_handles_labels()
+            ax1.legend(lines_1 + lines_2 + lines_3 + lines_4, labels_1 + labels_2 + labels_3 + labels_4, loc='best')
 
-        # --- Ensure full date range and proper tick spacing ---
-        ax1.set_xlim(subset['datetime'].min(), subset['datetime'].max())  # full X range
-        ax1.xaxis.set_major_locator(mdates.AutoDateLocator())             # smart tick spacing
-        ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))   # readable format
-        plt.xticks(rotation=45, ha='right')
+            # Title, grid, layout
+            # <--- FIX: Added 'country' to title for clarity
+            plt.title(f"{country} - {counterpart} — Moving Averages") 
+            ax1.grid(True, linestyle='--', alpha=0.6)
+            fig.tight_layout()
+            
+            # <--- 3. SAVE THE CURRENT FIGURE TO THE PDF
+            pdf.savefig(fig, bbox_inches="tight") 
+            
+            # <--- 4. CLOSE THE FIGURE TO FREE MEMORY
+            plt.close(fig) 
 
-        # Combine legends
-        lines_1, labels_1 = ax1.get_legend_handles_labels()
-        lines_2, labels_2 = ax2.get_legend_handles_labels()
-        lines_3, labels_3 = ax3.get_legend_handles_labels()
-        lines_4, labels_4 = ax4.get_legend_handles_labels()
-        ax1.legend(lines_1 + lines_2+lines_3+lines_4, labels_1 + labels_2+labels_3+labels_4, loc='best')
-
-        # Title, grid, layout
-        plt.title(f"{counterpart} — AvgTone * NumArticles vs 7D Moving Avg")
-        ax1.grid(True, linestyle='--', alpha=0.6)
-        fig.tight_layout()
-        fname=str(country)+str(counterpart)+".pdf"
-        plt.savefig(fname, format="pdf", bbox_inches="tight")
+# The 'with' block automatically closes the PDF file here
+print("All plots saved to all_plots.pdf")
 # Gravità conflittuale (solo eventi negativi)
 Data["C"] = Data["GoldsteinScale"].apply(lambda x: max(0, -x))
 
@@ -435,7 +423,7 @@ Data["EventRiskNegative*Numarticles"] = Data["C"] * Data["NumArticles"]
 
 
 # --- Save to Excel ---
-random_str = "".join(random.choices(string.ascii_letters + string.digits, k=8))
+
 filename = Path(desk) /f"gdelt_2_{random_str}.xlsx"
 Data.to_excel(filename, index=False, engine="xlsxwriter")
 
