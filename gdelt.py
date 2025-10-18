@@ -8,6 +8,9 @@ import plotly.express as px
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates 
 from matplotlib.backends.backend_pdf import PdfPages
+import country_converter as coco
+import os
+from glob import glob
 
 desk = os.getcwd()
 
@@ -89,16 +92,16 @@ sub = [    #120,190,#test
 print("importing dates")
 
 #UK attack heathrow
-start_dt = pd.to_datetime("20250801000000", format="%Y%m%d%H%M%S")
-end_dt = pd.to_datetime("20250925010000", format="%Y%m%d%H%M%S")
+#start_dt = pd.to_datetime("20250801000000", format="%Y%m%d%H%M%S")
+#end_dt = pd.to_datetime("20250925010000", format="%Y%m%d%H%M%S")
 
 #FR TV5 monde
-#start_dt = pd.to_datetime("20150301000000", format="%Y%m%d%H%M%S")
-#end_dt   = pd.to_datetime("20150414010000", format="%Y%m%d%H%M%S")
+#start_dt = pd.to_datetime("20150101000000", format="%Y%m%d%H%M%S")
+#end_dt   = pd.to_datetime("20150301010000", format="%Y%m%d%H%M%S")
 
 #test
-#start_dt = pd.to_datetime("20250918000000", format="%Y%m%d%H%M%S")
-#end_dt   = pd.to_datetime("20250925010000", format="%Y%m%d%H%M%S")
+start_dt = pd.to_datetime("20250918000000", format="%Y%m%d%H%M%S")
+end_dt   = pd.to_datetime("20250925010000", format="%Y%m%d%H%M%S")
 
 
 
@@ -110,12 +113,24 @@ Sourcename=Sourcename.replace(":","")
 
 
 
-
 #check if table is already available
 desk=str(os.getcwd())
 
+#import eurepoc
+print("importing eurepoc")
+path = desk+ '\\'
+files = glob('*eurepoc_data*')
+
+#for file in files:
+#    Eurepoc = pd.read_excel(path+str(file))
+
+
+
 # Specify path
 path = desk+'/'+Sourcename
+
+
+
 
 # Check whether the specified path exists or not
 isExist = os.path.exists(path)
@@ -224,9 +239,56 @@ else:
     print("importing from local file")
     Data = pd.read_excel(Sourcename)
 
-print("Import complted. Cleaning data")
+print("Import completed. Cleaning data")
+
+#import FIPS CONVERT TO ISO
+print("importing FIPS")
+path = desk+ '\\'
+files = glob('*FIPS*')
+
+for file in files:
+    FIPS = pd.read_excel(path+str(file))
+    
+
+Data=Data.merge(FIPS, left_on='Actor1Geo_CountryCode', right_on='Country Code')
+Data.rename(columns={'Country name':'Actor1Geo_CountryName'}, inplace=True)
+Data=Data.merge(FIPS, left_on='Actor2Geo_CountryCode', right_on='Country Code')
+Data.rename(columns={'Country name':'Actor2Geo_CountryName'}, inplace=True)
+
+#Data = Data.drop(columns=["SQLDATE", "MonthYear","Year","ActionGeo_FeatureID","FractionDate","Actor1Geo_ADM1Code", "Actor1Geo_ADM2Code", "Actor1Geo_Lat","Actor1Geo_Long","Actor2Geo_ADM1Code", "Actor2Geo_ADM2Code", "Actor2Geo_Lat","Actor2Geo_Long"])
+    
+    
+filename = Path(desk) /f"gdelt_2_{random_str}.xlsx"
+Data.to_excel(filename, index=False, engine="xlsxwriter")
+
+
+exit()
+
 #exit()
 #Data=Data[(Data['Actor1Type1Code'] == "GOV") | (Data['Actor2Type1Code'] == "GOV")]
+
+#convert to ISO2 country codes
+
+# Convert ISO2 codes to full country names
+#cc = coco.CountryConverter()
+
+countrycode.convert(
+    df['fips_code'],
+    origin='fips',
+    destination='iso2c',
+    nomatch=None  # Sets non-matches to None (or 'not found')
+)
+
+# Convert FIPS codes to country names
+Data['Actor1Geo_CountryCode'] = countrycode.convert(
+    Data['Actor1Geo_CountryCode'],
+    origin='fips',
+    destination='iso2c',
+    nomatch=None  # Sets non-matches to None (or 'not found')
+)
+#Data['Actor2Geo_CountryCode'] = cc.pandas_convert(series=Data['Actor2Geo_CountryCode'], src='FIPS_10_4', to='ISO2')
+
+
 
 
 Data['GeoCountries']  = Data["Actor1Geo_CountryCode"]+"+"+Data["Actor2Geo_CountryCode"]
@@ -258,6 +320,10 @@ Data["AvgTone*NumArticles"] = Data["AvgTone"] * Data["NumArticles"]
 
 #sort by datetime
 Data = Data.sort_values('datetime')
+
+#import eurepoc report
+
+
 
 #apply moving averages
 countries = ['UK','FR']
@@ -415,7 +481,7 @@ with PdfPages('all_plots'+random_str+'.pdf') as pdf:
                 plt.title(f"{country} - {counterpart} — Moving Averages") 
                 ax1.grid(True, linestyle='--', alpha=0.6)
                 fig.tight_layout()
-                
+                ax1.xaxis.set_major_locator(MultipleLocator(20))
                 # <--- 3. SAVE THE CURRENT FIGURE TO THE PDF
                 pdf.savefig(fig, bbox_inches="tight") 
                 
