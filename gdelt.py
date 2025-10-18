@@ -274,6 +274,7 @@ axes = plt.gca()
 #overall
 
 print("building averages and plots")
+f = plt.figure()
 
 
 #mask data for selected countries
@@ -284,7 +285,8 @@ for country, mask in masks.items():
     if subset.empty:
         print(f"No data for {country}, skipping.")
         continue
-
+    #saving this mask's country as first reference point 
+    Data.loc[mask, 'Country'] = country
     # Sort by datetime so rolling and plotting work correctly
     subset = subset.sort_values('datetime')
     #write the country of reference that was masked for future usage
@@ -297,77 +299,66 @@ for country, mask in masks.items():
     
     
     for counterpart in counterparts:
-        CounterpartDF=subset[(subset['Country'].str.contains(country, na=False) | subset['Counterpart'].str.contains(counterpart, na=False))]
+        print("processing "+country+" "+counterpart)
+        CounterpartDF=subset[(subset['Country'].str.contains(country, na=False) & subset['Counterpart'].str.contains(counterpart, na=False))]
+        print(CounterpartDF)
+        exit()
         #subset2 = np.where((Data['Country'].str==country) & (Data['Counterpart'].str==counterpart))
         #subset2=Data.loc[MaskCounterparts].copy()
         
         if CounterpartDF.empty:
             print(f"No data for {counterpart}, skipping.")
             continue
-        print(CounterpartDF)
-        exit()
+        #print(CounterpartDF)
+        
+        
+#########################CALCULATIONS of moving averages
         # Compute 1-day rolling mean
-        subset[f'{counterpart}_MovingAvg'] = (
-            subset.set_index('datetime')['GoldsteinScale']
+        CounterpartDF[f'{counterpart}_MovingAvg'] = (
+            CounterpartDF.set_index('datetime')['GoldsteinScale']
             .rolling('1D', min_periods=1)
             .mean()
             .values
         )
         # Compute 7-day rolling mean
-        subset[f'{counterpart}_7DMovingAvg'] = (
-            subset.set_index('datetime')['AvgTone*NumArticles']
+        CounterpartDF[f'{counterpart}_7DMovingAvg'] = (
+            CounterpartDF.set_index('datetime')['AvgTone*NumArticles']
             .rolling('7D', min_periods=10)
             .mean()
             .values
         )
         
             # Compute 1M rolling mean
-        subset[f'{counterpart}_1MMovingAvg'] = (
-            subset.set_index('datetime')['AvgTone*NumArticles']
+        CounterpartDF[f'{counterpart}_1MMovingAvg'] = (
+            CounterpartDF.set_index('datetime')['AvgTone*NumArticles']
             .rolling('30D', min_periods=50)
             .mean()
             .values
         )
             # Compute 1-day rolling mean on  tone only
-        subset[f'{counterpart}_1DMovingAvgTone'] = (
-            subset.set_index('datetime')['AvgTone']
+        CounterpartDF[f'{counterpart}_1DMovingAvgTone'] = (
+            CounterpartDF.set_index('datetime')['AvgTone']
             .rolling('1D', min_periods=1)
             .mean()
             .values
         )
         
+            # Save the 1DAY moving avg per couple country-counterpart back into Data (optional, to keep consistency)
+
+        #Data.loc[CounterpartDF, f'{counterpart}_MovingAvg'] = CounterpartDF[f'{counterpart}_MovingAvg'].values
+
+
+        
         
 
-        # Save the moving avg back into Data (optional, to keep consistency)
-        Data.loc[MaskCounterparts, f'{country}_MovingAvg'] = subset[f'{country}_MovingAvg'].values
-        #saving this mask's country as first reference point 
-        Data.loc[MaskCounterparts, 'Country'] = country
-        #Data.loc[mask, 'Counterpart'] = np.where(Data['Actor1Geo_CountryCode'] == country, df['col2'], df['col1'])
-        
-        
-        #mask2 = Data['Actor1Geo_CountryCode'].str.contains(country, na=False)
-        #subset2=Data.loc[mask2].copy()
-        #Data.loc[mask2, 'Counterpart'] = mask2['Actor2Geo_CountryCode']
-        #mask2 = Data['Actor2Geo_CountryCode'].str.contains(country, na=False)
-        #subset2=Data.loc[mask2].copy()
-        #Data.loc[mask2, 'Counterpart'] = mask2['Actor1Geo_CountryCode']
-    #    print(subset2)
-    #    exit()
-        #column_name = 'my_channel'
-        #df.loc[mask, column_name] = 0
-        #mask2 = Data['GeoCountries'].str.contains(country, na=False) for country in countries}
-        
-        #mask = df.my_channel > 20000
-        #column_name = 'my_channel'
-        #df.loc[mask, column_name] = 0
 
         # --- Plot ---
         fig, ax1 = plt.subplots(figsize=(12, 6))
 
         # Primary axis (original)
         ax1.plot(
-            subset['datetime'],
-            subset[f'{counterpart}_1DMovingAvgTone'],
+            CounterpartDF['datetime'],
+            CounterpartDF[f'{counterpart}_1DMovingAvgTone'],
             label='_1DMovingAvgTone',
             color='tab:blue',
             alpha=0.7
@@ -379,8 +370,8 @@ for country, mask in masks.items():
         # Secondary axis (1D moving avg Tone*Num)
         ax2 = ax1.twinx()
         ax2.plot(
-            subset['datetime'],
-            subset[f'{counterpart}_MovingAvg'],
+            CounterpartDF['datetime'],
+            CounterpartDF[f'{counterpart}_MovingAvg'],
             label='1D Moving Avg',
             color='tab:red',
             linewidth=2
@@ -392,8 +383,8 @@ for country, mask in masks.items():
             # 3 axis (7D moving avg)
         ax3 = ax1.twinx()
         ax3.plot(
-            subset['datetime'],
-            subset[f'{counterpart}_7DMovingAvg'],
+            CounterpartDF['datetime'],
+            CounterpartDF[f'{counterpart}_7DMovingAvg'],
             label='7D Moving Avg',
             color='tab:green',
             linewidth=1
@@ -405,8 +396,8 @@ for country, mask in masks.items():
         
         ax4 = ax1.twinx()
         ax4.plot(
-            subset['datetime'],
-            subset[f'{counterpart}_1MMovingAvg'],
+            CounterpartDF['datetime'],
+            CounterpartDF[f'{counterpart}_1MMovingAvg'],
             label='1M Moving Avg',
             color='tab:pink',
             linewidth=1
@@ -430,10 +421,11 @@ for country, mask in masks.items():
         ax1.legend(lines_1 + lines_2+lines_3+lines_4, labels_1 + labels_2+labels_3+labels_4, loc='best')
 
         # Title, grid, layout
-        plt.title(f"{country} — AvgTone * NumArticles vs 7D Moving Avg")
+        plt.title(f"{counterpart} — AvgTone * NumArticles vs 7D Moving Avg")
         ax1.grid(True, linestyle='--', alpha=0.6)
         fig.tight_layout()
-
+        fname=str(country)+str(counterpart)+".pdf"
+        plt.savefig(fname, format="pdf", bbox_inches="tight")
 # Gravità conflittuale (solo eventi negativi)
 Data["C"] = Data["GoldsteinScale"].apply(lambda x: max(0, -x))
 
@@ -450,7 +442,8 @@ Data.to_excel(filename, index=False, engine="xlsxwriter")
 print(f"Saved {len(Data)} rows -> {filename}")
 
 
-plt.show()
+#plt.show()
+#save to PDF
 
 
 
