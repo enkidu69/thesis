@@ -8,150 +8,18 @@ import os
 import requests, zipfile, io, csv, os, random, string
 from pathlib import Path
 from matplotlib.backends.backend_pdf import PdfPages
+from datetime import datetime, timedelta
+import gc
 
-# FIPS to ISO2 country code mapping
+# FIPS to ISO2 country code mapping (same as before)
 FIPS_TO_ISO2 = {
     'AF': 'AF', 'AX': 'AX', 'AL': 'AL', 'DZ': 'DZ', 'AS': 'AS', 'AD': 'AD', 'AO': 'AO', 'AI': 'AI',
     'AQ': 'AQ', 'AG': 'AG', 'AR': 'AR', 'AM': 'AM', 'AW': 'AW', 'AU': 'AU', 'AT': 'AT', 'AZ': 'AZ',
-    'BS': 'BS', 'BH': 'BH', 'BD': 'BD', 'BB': 'BB', 'BY': 'BY', 'BE': 'BE', 'BZ': 'BZ', 'BJ': 'BJ',
-    'BM': 'BM', 'BT': 'BT', 'BO': 'BO', 'BQ': 'BQ', 'BA': 'BA', 'BW': 'BW', 'BV': 'BV', 'BR': 'BR',
-    'IO': 'IO', 'BN': 'BN', 'BG': 'BG', 'BF': 'BF', 'BI': 'BI', 'KH': 'KH', 'CM': 'CM', 'CA': 'CA',
-    'CV': 'CV', 'KY': 'KY', 'CF': 'CF', 'TD': 'TD', 'CL': 'CL', 'CN': 'CN', 'CX': 'CX', 'CC': 'CC',
-    'CO': 'CO', 'KM': 'KM', 'CG': 'CG', 'CD': 'CD', 'CK': 'CK', 'CR': 'CR', 'CI': 'CI', 'HR': 'HR',
-    'CU': 'CU', 'CW': 'CW', 'CY': 'CY', 'CZ': 'CZ', 'DK': 'DK', 'DJ': 'DJ', 'DM': 'DM', 'DO': 'DO',
-    'EC': 'EC', 'EG': 'EG', 'SV': 'SV', 'GQ': 'GQ', 'ER': 'ER', 'EE': 'EE', 'ET': 'ET', 'FK': 'FK',
-    'FO': 'FO', 'FJ': 'FJ', 'FI': 'FI', 'FR': 'FR', 'GF': 'GF', 'PF': 'PF', 'TF': 'TF', 'GA': 'GA',
-    'GM': 'GM', 'GE': 'GE', 'DE': 'DE', 'GH': 'GH', 'GI': 'GI', 'GR': 'GR', 'GL': 'GL', 'GD': 'GD',
-    'GP': 'GP', 'GU': 'GU', 'GT': 'GT', 'GG': 'GG', 'GN': 'GN', 'GW': 'GW', 'GY': 'GY', 'HT': 'HT',
-    'HM': 'HM', 'VA': 'VA', 'HN': 'HN', 'HK': 'HK', 'HU': 'HU', 'IS': 'IS', 'IN': 'IN', 'ID': 'ID',
-    'IR': 'IR', 'IQ': 'IQ', 'IE': 'IE', 'IM': 'IM', 'IL': 'IL', 'IT': 'IT', 'JM': 'JM', 'JP': 'JP',
-    'JE': 'JE', 'JO': 'JO', 'KZ': 'KZ', 'KE': 'KE', 'KI': 'KI', 'KP': 'KP', 'KR': 'KR', 'KW': 'KW',
-    'KG': 'KG', 'LA': 'LA', 'LV': 'LV', 'LB': 'LB', 'LS': 'LS', 'LR': 'LR', 'LY': 'LY', 'LI': 'LI',
-    'LT': 'LT', 'LU': 'LU', 'MO': 'MO', 'MK': 'MK', 'MG': 'MG', 'MW': 'MW', 'MY': 'MY', 'MV': 'MV',
-    'ML': 'ML', 'MT': 'MT', 'MH': 'MH', 'MQ': 'MQ', 'MR': 'MR', 'MU': 'MU', 'YT': 'YT', 'MX': 'MX',
-    'FM': 'FM', 'MD': 'MD', 'MC': 'MC', 'MN': 'MN', 'ME': 'ME', 'MS': 'MS', 'MA': 'MA', 'MZ': 'MZ',
-    'MM': 'MM', 'NA': 'NA', 'NR': 'NR', 'NP': 'NP', 'NL': 'NL', 'NC': 'NC', 'NZ': 'NZ', 'NI': 'NI',
-    'NE': 'NE', 'NG': 'NG', 'NU': 'NU', 'NF': 'NF', 'MP': 'MP', 'NO': 'NO', 'OM': 'OM', 'PK': 'PK',
-    'PW': 'PW', 'PS': 'PS', 'PA': 'PA', 'PG': 'PG', 'PY': 'PY', 'PE': 'PE', 'PH': 'PH', 'PN': 'PN',
-    'PL': 'PL', 'PT': 'PT', 'PR': 'PR', 'QA': 'QA', 'RE': 'RE', 'RO': 'RO', 'RU': 'RU', 'RW': 'RW',
-    'BL': 'BL', 'SH': 'SH', 'KN': 'KN', 'LC': 'LC', 'MF': 'MF', 'PM': 'PM', 'VC': 'VC', 'WS': 'WS',
-    'SM': 'SM', 'ST': 'ST', 'SA': 'SA', 'SN': 'SN', 'RS': 'RS', 'SC': 'SC', 'SL': 'SL', 'SG': 'SG',
-    'SX': 'SX', 'SK': 'SK', 'SI': 'SI', 'SB': 'SB', 'SO': 'SO', 'ZA': 'ZA', 'GS': 'GS', 'SS': 'SS',
-    'ES': 'ES', 'LK': 'LK', 'SD': 'SD', 'SR': 'SR', 'SJ': 'SJ', 'SZ': 'SZ', 'SE': 'SE', 'CH': 'CH',
-    'SY': 'SY', 'TW': 'TW', 'TJ': 'TJ', 'TZ': 'TZ', 'TH': 'TH', 'TL': 'TL', 'TG': 'TG', 'TK': 'TK',
-    'TO': 'TO', 'TT': 'TT', 'TN': 'TN', 'TR': 'TR', 'TM': 'TM', 'TC': 'TC', 'TV': 'TV', 'UG': 'UG',
+    # ... (keep your existing FIPS_TO_ISO2 mapping)
     'UA': 'UA', 'AE': 'AE', 'GB': 'GB', 'US': 'US', 'UM': 'UM', 'UY': 'UY', 'UZ': 'UZ', 'VU': 'VU',
     'VE': 'VE', 'VN': 'VN', 'VG': 'VG', 'VI': 'VI', 'WF': 'WF', 'EH': 'EH', 'YE': 'YE', 'ZM': 'ZM',
     'ZW': 'ZW'
 }
-
-def filter_and_convert_columns(df, focal_countries):
-    """
-    Filter columns to keep only essential ones and convert FIPS to ISO2 country codes
-    """
-    # Define columns to keep
-    essential_columns = [
-        'SQLDATE', 'SOURCEURL',
-        'Actor1Geo_CountryCode', 'Actor2Geo_CountryCode',
-        'EventRootCode', 'EventBaseCode', 'EventCode',
-        'GoldsteinScale', 'AvgTone', 'NumMentions', 'NumArticles', 'NumSources'
-    ]
-    
-    # Filter columns - only keep those that exist in the dataframe
-    available_columns = [col for col in essential_columns if col in df.columns]
-    df_filtered = df[available_columns].copy()
-    
-    print(f"Filtered columns from {len(df.columns)} to {len(df_filtered.columns)}")
-    print(f"Keeping columns: {list(df_filtered.columns)}")
-    
-    # Convert country codes from FIPS to ISO2
-    def convert_country_code(code):
-        if pd.isna(code) or code == '':
-            return code
-        # GDELT uses FIPS codes which are mostly the same as ISO2, but we'll use mapping for safety
-        return FIPS_TO_ISO2.get(code, code)  # Return original if not in mapping
-    
-    # Convert both actor country codes
-    df_filtered['Actor1Geo_CountryCode'] = df_filtered['Actor1Geo_CountryCode'].apply(convert_country_code)
-    df_filtered['Actor2Geo_CountryCode'] = df_filtered['Actor2Geo_CountryCode'].apply(convert_country_code)
-    
-    # Verify our focal countries are in the correct format
-    for country in focal_countries:
-        if country not in FIPS_TO_ISO2.values():
-            print(f"Warning: Focal country {country} may not be in ISO2 format")
-    
-    return df_filtered
-
-def calculate_negativity_scores(df, focal_countries, year):
-    """
-    Calculate DAILY negativity scores based on AvgTone for multiple focal countries
-    """
-    
-    # Group by Date, FocalCountry and Relationship Pair
-    daily_relationships = df.groupby(['Date', 'FocalCountry', 'RelationshipPair']).agg({
-        'AvgTone': ['mean', 'std', 'count'],
-        'GoldsteinScale': ['mean', 'std'],
-        'EventBaseCode': 'count',
-        'NumMentions': 'sum',
-        'NumArticles': 'sum',
-        'NumSources': 'sum'
-    }).round(4)
-    
-    # Flatten column names
-    daily_relationships.columns = ['_'.join(col).strip() for col in daily_relationships.columns.values]
-    daily_relationships = daily_relationships.rename(columns={
-        'AvgTone_mean': 'Daily_AvgTone',
-        'AvgTone_std': 'Daily_AvgTone_Std',
-        'AvgTone_count': 'Daily_AvgTone_Count',
-        'GoldsteinScale_mean': 'Daily_Goldstein',
-        'GoldsteinScale_std': 'Daily_Goldstein_Std',
-        'EventBaseCode_count': 'Daily_EventCount',
-        'NumMentions_sum': 'Daily_NumMentions',
-        'NumArticles_sum': 'Daily_NumArticles',
-        'NumSources_sum': 'Daily_NumSources'
-    }).reset_index()
-    
-    # ENSURE WE ONLY HAVE DATES FROM THE SPECIFIED YEAR
-    daily_relationships = daily_relationships[daily_relationships['Date'].dt.year == year]
-    
-    # Calculate negativity scores and Z-scores
-    daily_scores = pd.DataFrame()
-    
-    for focal_country in focal_countries:
-        country_data = daily_relationships[daily_relationships['FocalCountry'] == focal_country].copy()
-        
-        for relationship in country_data['RelationshipPair'].unique():
-            rel_data = country_data[country_data['RelationshipPair'] == relationship].copy()
-            
-            # Sort by date
-            rel_data = rel_data.sort_values('Date')
-            
-            # Use smaller window for limited date range
-            window = min(7, len(rel_data))
-            
-            # Calculate rolling statistics for AvgTone (focus on negativity)
-            rel_data['AvgTone_Rolling_Mean'] = rel_data['Daily_AvgTone'].rolling(window, min_periods=1).mean()
-            rel_data['AvgTone_Rolling_Std'] = rel_data['Daily_AvgTone'].rolling(window, min_periods=1).std()
-            
-            # Calculate Negativity Score (negative AvgTone = higher negativity)
-            rel_data['Negativity_Score'] = -rel_data['Daily_AvgTone']  # Direct inversion
-            
-            # Calculate Negativity Z-Score (how negative compared to historical average)
-            rel_data['Negativity_ZScore'] = -rel_data['AvgTone_Rolling_Mean'] / rel_data['AvgTone_Rolling_Std']
-            
-            # Handle division by zero
-            rel_data['Negativity_ZScore'] = rel_data['Negativity_ZScore'].replace([np.inf, -np.inf], np.nan)
-            rel_data['Negativity_ZScore'] = rel_data['Negativity_ZScore'].fillna(0)
-            
-            # Create composite risk score focusing on negativity
-            rel_data['Composite_Negativity_Score'] = (
-                rel_data['Negativity_Score'] +  # Direct negativity
-                rel_data['Negativity_ZScore']   # Relative negativity
-            )
-            
-            daily_scores = pd.concat([daily_scores, rel_data])
-    
-    return daily_scores
 
 def find_common_counterparts(daily_scores, focal_countries, min_events=5):
     """
@@ -192,6 +60,300 @@ def find_common_counterparts(daily_scores, focal_countries, min_events=5):
                         })
     
     return pd.DataFrame(common_relationships)
+
+
+
+def download_in_chunks(year, focal_countries, chunk_size_days=7, temp_dir='temp_data'):
+    """
+    Download GDELT data in smaller chunks to avoid memory issues
+    Reuses existing chunk files if available
+    """
+    if not os.path.exists(temp_dir):
+        os.makedirs(temp_dir)
+    
+    # Define date ranges for chunks
+    start_date = datetime(year, 9, 1)
+    end_date = datetime(year, 10, 18)
+    current_date = start_date
+    
+    chunk_files = []
+    
+    while current_date <= end_date:
+        chunk_end = min(current_date + timedelta(days=chunk_size_days-1), end_date)
+        
+        start_str = current_date.strftime('%Y-%m-%d')
+        end_str = chunk_end.strftime('%Y-%m-%d')
+        
+        chunk_filename = f"chunk_{start_str}_{end_str}.pkl"
+        chunk_path = os.path.join(temp_dir, chunk_filename)
+        
+        # CHECK IF CHUNK ALREADY EXISTS
+        if os.path.exists(chunk_path):
+            print(f"Found existing chunk: {chunk_filename}")
+            chunk_files.append(chunk_path)
+        else:
+            print(f"Downloading chunk: {start_str} to {end_str}")
+            
+            try:
+                # Download this chunk
+                df_chunk = g1.Search([start_str, end_str], table='events', coverage=False)
+                
+                if len(df_chunk) > 0:
+                    # Remove duplicates and filter columns immediately
+                    df_chunk = df_chunk.drop_duplicates(subset=["SOURCEURL"], keep='last')
+                    df_chunk = filter_and_convert_columns(df_chunk, focal_countries)
+                    
+                    # Save chunk to file
+                    df_chunk.to_pickle(chunk_path)
+                    chunk_files.append(chunk_path)
+                    
+                    print(f"  Saved chunk with {len(df_chunk):,} events to {chunk_filename}")
+                else:
+                    print(f"  No data for this chunk")
+                
+                # Clear memory
+                del df_chunk
+                gc.collect()
+                
+            except Exception as e:
+                print(f"  Error downloading chunk {start_str} to {end_str}: {e}")
+        
+        # Move to next chunk
+        current_date = chunk_end + timedelta(days=1)
+    
+    return chunk_files
+    
+def check_existing_chunks(year, temp_dir='temp_data'):
+    """
+    Check how many chunks already exist and their status
+    """
+    if not os.path.exists(temp_dir):
+        return 0, []
+    
+    start_date = datetime(year, 9, 1)
+    end_date = datetime(year, 10, 18)
+    current_date = start_date
+    
+    existing_chunks = []
+    missing_chunks = []
+    
+    while current_date <= end_date:
+        chunk_end = min(current_date + timedelta(days=6), end_date)  # 7-day chunks
+        
+        start_str = current_date.strftime('%Y-%m-%d')
+        end_str = chunk_end.strftime('%Y-%m-%d')
+        
+        chunk_filename = f"chunk_{start_str}_{end_str}.pkl"
+        chunk_path = os.path.join(temp_dir, chunk_filename)
+        
+        if os.path.exists(chunk_path):
+            # Check file size to see if it's valid
+            file_size = os.path.getsize(chunk_path)
+            if file_size > 100:  # Minimum reasonable file size
+                existing_chunks.append(chunk_path)
+            else:
+                print(f"Warning: Small/empty chunk file: {chunk_filename} ({file_size} bytes)")
+                missing_chunks.append((start_str, end_str))
+        else:
+            missing_chunks.append((start_str, end_str))
+        
+        current_date = chunk_end + timedelta(days=1)
+    
+    return existing_chunks, missing_chunks
+
+def process_chunk_files(chunk_files, focal_countries, event_codes=None):
+    """
+    Process chunk files and combine filtered data
+    """
+    all_country_data = []
+    
+    for i, chunk_file in enumerate(chunk_files):
+        print(f"Processing chunk {i+1}/{len(chunk_files)}: {os.path.basename(chunk_file)}")
+        
+        # Load chunk
+        df_chunk = pd.read_pickle(chunk_file)
+        
+        # Process each focal country for this chunk
+        for focal_country in focal_countries:
+            # Filter for events where focal country is either Actor1 OR Actor2
+            focal_filter = (
+                (df_chunk['Actor1Geo_CountryCode'] == focal_country) | 
+                (df_chunk['Actor2Geo_CountryCode'] == focal_country)
+            )
+            
+            df_filtered = df_chunk[focal_filter].copy()
+            
+            # Filter by event codes if provided
+            if event_codes:
+                df_filtered = df_filtered[df_filtered['EventBaseCode'].isin(event_codes)]
+            
+            if len(df_filtered) > 0:
+                # Create relationship column
+                def get_relationship_pair(row):
+                    if row['Actor1Geo_CountryCode'] == focal_country:
+                        return f"{focal_country}-{row['Actor2Geo_CountryCode']}"
+                    else:
+                        return f"{focal_country}-{row['Actor1Geo_CountryCode']}"
+                
+                df_filtered['RelationshipPair'] = df_filtered.apply(get_relationship_pair, axis=1)
+                df_filtered['FocalCountry'] = focal_country
+                
+                # Convert SQLDATE to proper datetime
+                df_filtered['Date'] = pd.to_datetime(df_filtered['SQLDATE'].astype(str), format='%Y%m%d')
+                
+                all_country_data.append(df_filtered)
+        
+        # Clear memory
+        del df_chunk, df_filtered
+        gc.collect()
+    
+    if all_country_data:
+        combined_df = pd.concat(all_country_data, ignore_index=True)
+        print(f"Total combined events after processing: {len(combined_df):,}")
+        return combined_df
+    else:
+        return pd.DataFrame()
+
+def filter_and_convert_columns(df, focal_countries):
+    """
+    Filter columns to keep only essential ones and convert FIPS to ISO2 country codes
+    """
+    # Define columns to keep
+    essential_columns = [
+        'SQLDATE', 'SOURCEURL',
+        'Actor1Geo_CountryCode', 'Actor2Geo_CountryCode',
+        'EventRootCode', 'EventBaseCode', 'EventCode',
+        'GoldsteinScale', 'AvgTone', 'NumMentions', 'NumArticles', 'NumSources'
+    ]
+    
+    # Filter columns - only keep those that exist in the dataframe
+    available_columns = [col for col in essential_columns if col in df.columns]
+    df_filtered = df[available_columns].copy()
+    
+    print(f"  Filtered columns from {len(df.columns)} to {len(df_filtered.columns)}")
+    
+    # Convert country codes from FIPS to ISO2
+    def convert_country_code(code):
+        if pd.isna(code) or code == '':
+            return code
+        return FIPS_TO_ISO2.get(code, code)
+    
+    # Convert both actor country codes
+    df_filtered['Actor1Geo_CountryCode'] = df_filtered['Actor1Geo_CountryCode'].apply(convert_country_code)
+    df_filtered['Actor2Geo_CountryCode'] = df_filtered['Actor2Geo_CountryCode'].apply(convert_country_code)
+    
+    return df_filtered
+
+def calculate_negativity_scores_incremental(combined_df, focal_countries, year, batch_size=10000):
+    """
+    Calculate scores in batches to avoid memory issues
+    """
+    if len(combined_df) == 0:
+        return pd.DataFrame()
+    
+    # Process in batches if dataframe is large
+    if len(combined_df) > batch_size:
+        print(f"Processing {len(combined_df):,} events in batches of {batch_size:,}")
+        
+        all_daily_scores = []
+        num_batches = (len(combined_df) + batch_size - 1) // batch_size
+        
+        for i in range(num_batches):
+            start_idx = i * batch_size
+            end_idx = min((i + 1) * batch_size, len(combined_df))
+            
+            print(f"  Processing batch {i+1}/{num_batches}: rows {start_idx:,} to {end_idx:,}")
+            
+            batch_df = combined_df.iloc[start_idx:end_idx].copy()
+            batch_scores = calculate_negativity_scores_batch(batch_df, focal_countries, year)
+            
+            if not batch_scores.empty:
+                all_daily_scores.append(batch_scores)
+            
+            # Clear memory
+            del batch_df, batch_scores
+            gc.collect()
+        
+        if all_daily_scores:
+            return pd.concat(all_daily_scores, ignore_index=True)
+        else:
+            return pd.DataFrame()
+    else:
+        return calculate_negativity_scores_batch(combined_df, focal_countries, year)
+
+def calculate_negativity_scores_batch(df, focal_countries, year):
+    """
+    Calculate scores for a single batch
+    """
+    # Group by Date, FocalCountry and Relationship Pair
+    daily_relationships = df.groupby(['Date', 'FocalCountry', 'RelationshipPair']).agg({
+        'AvgTone': ['mean', 'std', 'count'],
+        'GoldsteinScale': ['mean', 'std'],
+        'EventBaseCode': 'count',
+        'NumMentions': 'sum',
+        'NumArticles': 'sum',
+        'NumSources': 'sum'
+    }).round(4)
+    
+    # Flatten column names
+    daily_relationships.columns = ['_'.join(col).strip() for col in daily_relationships.columns.values]
+    daily_relationships = daily_relationships.rename(columns={
+        'AvgTone_mean': 'Daily_AvgTone',
+        'AvgTone_std': 'Daily_AvgTone_Std',
+        'AvgTone_count': 'Daily_AvgTone_Count',
+        'GoldsteinScale_mean': 'Daily_Goldstein',
+        'GoldsteinScale_std': 'Daily_Goldstein_Std',
+        'EventBaseCode_count': 'Daily_EventCount',
+        'NumMentions_sum': 'Daily_NumMentions',
+        'NumArticles_sum': 'Daily_NumArticles',
+        'NumSources_sum': 'Daily_NumSources'
+    }).reset_index()
+    
+    # Filter by year
+    daily_relationships = daily_relationships[daily_relationships['Date'].dt.year == year]
+    
+    # Calculate scores
+    daily_scores = pd.DataFrame()
+    
+    for focal_country in focal_countries:
+        country_data = daily_relationships[daily_relationships['FocalCountry'] == focal_country].copy()
+        
+        for relationship in country_data['RelationshipPair'].unique():
+            rel_data = country_data[country_data['RelationshipPair'] == relationship].copy()
+            rel_data = rel_data.sort_values('Date')
+            
+            window = min(7, len(rel_data))
+            
+            # Calculate rolling statistics
+            rel_data['AvgTone_Rolling_Mean'] = rel_data['Daily_AvgTone'].rolling(window, min_periods=1).mean()
+            rel_data['AvgTone_Rolling_Std'] = rel_data['Daily_AvgTone'].rolling(window, min_periods=1).std()
+            
+            # Calculate scores
+            rel_data['Negativity_Score'] = -rel_data['Daily_AvgTone']
+            rel_data['Negativity_ZScore'] = -rel_data['AvgTone_Rolling_Mean'] / rel_data['AvgTone_Rolling_Std']
+            rel_data['Negativity_ZScore'] = rel_data['Negativity_ZScore'].replace([np.inf, -np.inf], np.nan).fillna(0)
+            rel_data['Composite_Negativity_Score'] = rel_data['Negativity_Score'] + rel_data['Negativity_ZScore']
+            
+            # New impact indices
+            rel_data['Tone_Article_Index'] = rel_data['Daily_AvgTone'] * rel_data['Daily_NumArticles']
+            rel_data['Negativity_Article_Index'] = rel_data['Negativity_Score'] * rel_data['Daily_NumArticles']
+            
+            daily_scores = pd.concat([daily_scores, rel_data])
+    
+    return daily_scores
+
+# Keep the existing find_common_counterparts and create_comparison_pdf_report functions
+# (they should work as-is with the incremental approach)
+
+def cleanup_temp_files(chunk_files):
+    """Clean up temporary chunk files"""
+    for chunk_file in chunk_files:
+        try:
+            os.remove(chunk_file)
+            print(f"Cleaned up: {chunk_file}")
+        except:
+            pass
+
 
 def create_comparison_pdf_report(daily_scores, focal_countries, year, top_common=10, output_dir='reports'):
     """
@@ -251,6 +413,9 @@ def create_comparison_pdf_report(daily_scores, focal_countries, year, top_common
         axes[0, 0].set_title('Daily Negativity Score Comparison\n(Higher = More Negative)', 
                             fontsize=12, fontweight='bold')
         axes[0, 0].set_ylabel('Negativity Score', fontsize=10)
+        
+        # REDUCE TICKS: Set major locator for dates (every 7 days)
+        axes[0, 0].xaxis.set_major_locator(plt.MaxNLocator(8))
         axes[0, 0].tick_params(axis='x', rotation=45)
         axes[0, 0].grid(True, alpha=0.3)
         axes[0, 0].legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
@@ -274,11 +439,14 @@ def create_comparison_pdf_report(daily_scores, focal_countries, year, top_common
         axes[0, 1].set_title('Negativity Z-Score Comparison\n(Relative to Historical Average)', 
                             fontsize=12, fontweight='bold')
         axes[0, 1].set_ylabel('Z-Score', fontsize=10)
+        
+        # REDUCE TICKS
+        axes[0, 1].xaxis.set_major_locator(plt.MaxNLocator(8))
         axes[0, 1].tick_params(axis='x', rotation=45)
         axes[0, 1].grid(True, alpha=0.3)
         axes[0, 1].legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
         
-        # Plot 3: Composite Negativity Score
+        # Plot 3: NEW - Tone-Article Impact Index
         for i, counterpart in enumerate(top_counterparts):
             for focal_country in focal_countries:
                 rel_data = daily_scores[
@@ -288,20 +456,23 @@ def create_comparison_pdf_report(daily_scores, focal_countries, year, top_common
                 if not rel_data.empty:
                     color = 'red' if focal_country == focal_countries[0] else 'blue'
                     linestyle = '-' if focal_country == focal_countries[0] else '--'
-                    axes[1, 0].plot(rel_data['Date'], rel_data['Composite_Negativity_Score'], 
+                    axes[1, 0].plot(rel_data['Date'], rel_data['Tone_Article_Index'], 
                                    label=f'{focal_country}-{counterpart}', 
                                    color=color, linestyle=linestyle, linewidth=2,
                                    marker='o' if focal_country == focal_countries[0] else 's',
                                    markersize=4)
         
-        axes[1, 0].set_title('Composite Negativity Score\n(Combined Absolute and Relative Negativity)', 
+        axes[1, 0].set_title('Tone-Article Impact Index\n(AvgTone × NumArticles)', 
                             fontsize=12, fontweight='bold')
-        axes[1, 0].set_ylabel('Composite Score', fontsize=10)
+        axes[1, 0].set_ylabel('Impact Index', fontsize=10)
+        
+        # REDUCE TICKS
+        axes[1, 0].xaxis.set_major_locator(plt.MaxNLocator(8))
         axes[1, 0].tick_params(axis='x', rotation=45)
         axes[1, 0].grid(True, alpha=0.3)
         axes[1, 0].legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
         
-        # Plot 4: Event Count Comparison
+        # Plot 4: NEW - Negativity-Article Impact Index
         for i, counterpart in enumerate(top_counterparts):
             for focal_country in focal_countries:
                 rel_data = daily_scores[
@@ -310,15 +481,22 @@ def create_comparison_pdf_report(daily_scores, focal_countries, year, top_common
                 ]
                 if not rel_data.empty:
                     color = 'red' if focal_country == focal_countries[0] else 'blue'
-                    axes[1, 1].bar([f'{focal_country}-{counterpart}'], 
-                                  [rel_data['Daily_EventCount'].sum()],
-                                  color=color, alpha=0.7, label=focal_country)
+                    linestyle = '-' if focal_country == focal_countries[0] else '--'
+                    axes[1, 1].plot(rel_data['Date'], rel_data['Negativity_Article_Index'], 
+                                   label=f'{focal_country}-{counterpart}', 
+                                   color=color, linestyle=linestyle, linewidth=2,
+                                   marker='o' if focal_country == focal_countries[0] else 's',
+                                   markersize=4)
         
-        axes[1, 1].set_title('Total Event Count by Relationship', 
+        axes[1, 1].set_title('Negativity-Article Impact Index\n(Negativity × NumArticles)', 
                             fontsize=12, fontweight='bold')
-        axes[1, 1].set_ylabel('Total Events', fontsize=10)
+        axes[1, 1].set_ylabel('Impact Index', fontsize=10)
+        
+        # REDUCE TICKS
+        axes[1, 1].xaxis.set_major_locator(plt.MaxNLocator(8))
         axes[1, 1].tick_params(axis='x', rotation=45)
-        axes[1, 1].legend(fontsize=8)
+        axes[1, 1].grid(True, alpha=0.3)
+        axes[1, 1].legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
         
         plt.tight_layout()
         pdf.savefig(fig, bbox_inches='tight')
@@ -352,17 +530,20 @@ def create_comparison_pdf_report(daily_scores, focal_countries, year, top_common
                         (daily_scores['RelationshipPair'] == f"{focal_countries[1]}-{counterpart}")
                     ]
                     
-                    # Plot both countries' negativity scores
+                    # Plot both countries' Tone-Article Impact Index
                     if not data1.empty:
-                        axes[row, col].plot(data1['Date'], data1['Negativity_Score'], 
+                        axes[row, col].plot(data1['Date'], data1['Tone_Article_Index'], 
                                           label=focal_countries[0], color='red', linewidth=2, marker='o')
                     if not data2.empty:
-                        axes[row, col].plot(data2['Date'], data2['Negativity_Score'], 
+                        axes[row, col].plot(data2['Date'], data2['Tone_Article_Index'], 
                                           label=focal_countries[1], color='blue', linewidth=2, marker='s')
                     
-                    axes[row, col].set_title(f'With {counterpart}\nNegativity Comparison', 
+                    axes[row, col].set_title(f'With {counterpart}\nTone-Article Impact Index', 
                                            fontsize=11, fontweight='bold')
-                    axes[row, col].set_ylabel('Negativity Score', fontsize=9)
+                    axes[row, col].set_ylabel('Impact Index', fontsize=9)
+                    
+                    # REDUCE TICKS
+                    axes[row, col].xaxis.set_major_locator(plt.MaxNLocator(6))
                     axes[row, col].tick_params(axis='x', rotation=45)
                     axes[row, col].legend(fontsize=8)
                     axes[row, col].grid(True, alpha=0.3)
@@ -377,103 +558,164 @@ def create_comparison_pdf_report(daily_scores, focal_countries, year, top_common
             plt.tight_layout()
             pdf.savefig(fig, bbox_inches='tight')
             plt.close()
+        
+        # PAGE 3: Summary statistics with new indices
+        fig, ax = plt.subplots(figsize=(12, 8))
+        ax.axis('tight')
+        ax.axis('off')
+        
+        # Create summary table with new indices
+        summary_data = []
+        for relationship in top_counterparts:
+            for focal_country in focal_countries:
+                rel_data = daily_scores[
+                    (daily_scores['FocalCountry'] == focal_country) & 
+                    (daily_scores['RelationshipPair'] == f"{focal_country}-{relationship}")
+                ]
+                if not rel_data.empty:
+                    summary_data.append([
+                        f"{focal_country}-{relationship}",
+                        f"{rel_data['Daily_EventCount'].sum():,}",
+                        f"{rel_data['Daily_AvgTone'].mean():.3f}",
+                        f"{rel_data['Daily_NumArticles'].sum():,}",
+                        f"{rel_data['Tone_Article_Index'].mean():.3f}",
+                        f"{rel_data['Negativity_Article_Index'].mean():.3f}"
+                    ])
+        
+        table = ax.table(cellText=summary_data,
+                        colLabels=['Relationship', 'Total Events', 'Avg Tone', 'Total Articles', 
+                                 'Tone-Article Index', 'Negativity-Article Index'],
+                        cellLoc='center',
+                        loc='center')
+        
+        table.auto_set_font_size(False)
+        table.set_fontsize(9)
+        table.scale(1.2, 1.8)
+        
+        ax.set_title(f'Summary Statistics with Impact Indices: {" vs ".join(focal_countries)} ({year})', 
+                    fontsize=16, fontweight='bold', pad=20)
+        
+        pdf.savefig(fig, bbox_inches='tight')
+        plt.close()
     
     print(f"PDF report saved to: {pdf_path}")
     return pdf_path
 
-# MAIN EXECUTION
+
+
+# UPDATED MAIN EXECUTION
 if __name__ == "__main__":
     # Initialize GDELT
     g1 = gdelt(version=1)
     
     # Parameters
     YEAR = 2025
-    FOCAL_COUNTRIES = ['FR', 'UK']  # France vs UK comparison
+    FOCAL_COUNTRIES = ['FR', 'UK']
     EVENT_CODES = ['012','016','0212','0214','0232','0233','0234','0243','0244','0252','0253','0254','0255','0256','026','027','028','0312','0314','032','0332','0333','0334','0354','0355','0356','036','037','038','039','046','050','051','052','053','054','055','056','057','06','060','061','062','063','064','071','072','073','074','075','0811','0812','0813','0814','082','083','0831','0832','0833','0834','0841','085','086','0861','0862','0863','087','0871','0872','0873','0874','092','093','094','1012','1014','102','1032','1033','1034','1041','1042','1043','1044','1052','1054','1055','1056','106','107','108','111','1121','1122','1123','1124','1125','113','114','115','116','121','1211','1212','122','1221','1222','1223','1224','123','1231','1232','1233','1234','124','1241','1242','1243','1244','1245','1246','125','126','127','128','129','130','131','1311','1312','1313','132','1321','1322','1323','1324','133','134','135','136','137','138','1381','1382','1383','1384','1385','139','140','141','1411','1412','1413','1414','142','1421','1422','1423','1424','143','1431','1432','1433','1434','144','1441','1442','1443','1444','145','1451','1452','1453','1454','150','151','152','153','154','155','16','160','161','162','1621','1622','1623','163','164','165','166','1661','1662','1663','1712','1721','1722','1723','1724','174','175','180','181','182','1821','1822','1823','183','1831','1832','1833','1834','184','185','186','190','191','192','193','194','195','1951','1952','196','200','201','202','203','204','2041','2042']
     
+    chunk_files = []
+    
     try:
-        print(f"Downloading GDELT data for {YEAR}...")
-        print("Press Ctrl+C at any time to interrupt the download")
+        print(f"Starting incremental download and processing for {YEAR}...")
+        print("Press Ctrl+C at any time to interrupt the process")
         
-        # DOWNLOAD DATA DIRECTLY IN MAIN (INTERRUPTIBLE)
-        start_date = f"{YEAR}-10-15"
-        end_date = f"{YEAR}-10-18"
+        # STEP 0: CHECK FOR EXISTING CHUNKS FIRST
+        print("Checking for existing chunk files...")
+        existing_chunks, missing_chunks = check_existing_chunks(YEAR)
         
-        df = g1.Search([start_date, end_date], table='events', coverage=False)
-        print(f"Downloaded {len(df):,} total events")
-        
-        # Remove duplicate URLs
-        df = df.drop_duplicates(subset=["SOURCEURL"], keep='last')
-        print(f"After removing URL duplicates: {len(df):,} events")
-        
-        # FILTER COLUMNS AND CONVERT COUNTRY CODES
-        df = filter_and_convert_columns(df, FOCAL_COUNTRIES)
-        
-        all_country_data = []
-        
-        for focal_country in FOCAL_COUNTRIES:
-            print(f"\nAnalyzing {focal_country}...")
+        if existing_chunks:
+            print(f"Found {len(existing_chunks)} existing chunk files:")
+            for chunk in existing_chunks:
+                file_size = os.path.getsize(chunk) / 1024 / 1024  # Size in MB
+                print(f"  {os.path.basename(chunk)} ({file_size:.1f} MB)")
             
-            # Filter for events where focal country is either Actor1 OR Actor2
-            focal_filter = (
-                (df['Actor1Geo_CountryCode'] == focal_country) | 
-                (df['Actor2Geo_CountryCode'] == focal_country)
-            )
-            
-            df_filtered = df[focal_filter].copy()
-            print(f"Found {len(df_filtered):,} events involving {focal_country}")
-            
-            # Filter by event codes if provided
-            if EVENT_CODES:
-                df_filtered = df_filtered[df_filtered['EventBaseCode'].isin(EVENT_CODES)]
-                print(f"After event code filtering: {len(df_filtered):,} events")
-            
-            # Create relationship column: always "FocalCountry-OtherCountry"
-            def get_relationship_pair(row):
-                if row['Actor1Geo_CountryCode'] == focal_country:
-                    return f"{focal_country}-{row['Actor2Geo_CountryCode']}"
-                else:
-                    return f"{focal_country}-{row['Actor1Geo_CountryCode']}"
-            
-            df_filtered['RelationshipPair'] = df_filtered.apply(get_relationship_pair, axis=1)
-            df_filtered['FocalCountry'] = focal_country
-            
-            # Convert SQLDATE to proper datetime and ensure year filtering
-            df_filtered['Date'] = pd.to_datetime(df_filtered['SQLDATE'].astype(str), format='%Y%m%d')
-            df_filtered = df_filtered[df_filtered['Date'].dt.year == YEAR]
-            
-            all_country_data.append(df_filtered)
+            if missing_chunks:
+                print(f"\nMissing chunks for dates:")
+                for start_str, end_str in missing_chunks:
+                    print(f"  {start_str} to {end_str}")
+                
+                user_input = input("\nDo you want to: [1] Use existing chunks only, [2] Download missing chunks, [3] Redownload all? ")
+                
+                if user_input == "1":
+                    chunk_files = existing_chunks
+                    print("Using existing chunks only...")
+                elif user_input == "2":
+                    print("Downloading missing chunks...")
+                    # We'll handle this in the download_in_chunks function
+                    chunk_files = download_in_chunks(YEAR, FOCAL_COUNTRIES, chunk_size_days=7)
+                else:  # "3" or any other input
+                    print("Redownloading all chunks...")
+                    # Clean up existing chunks
+                    for chunk in existing_chunks:
+                        try:
+                            os.remove(chunk)
+                            print(f"Removed: {os.path.basename(chunk)}")
+                        except:
+                            pass
+                    chunk_files = download_in_chunks(YEAR, FOCAL_COUNTRIES, chunk_size_days=7)
+            else:
+                print("\nAll chunks already exist! Using existing files.")
+                chunk_files = existing_chunks
+        else:
+            print("No existing chunks found. Starting fresh download...")
+            chunk_files = download_in_chunks(YEAR, FOCAL_COUNTRIES, chunk_size_days=7)
         
-        combined_df = pd.concat(all_country_data, ignore_index=True)
-        print(f"\nTotal combined events: {len(combined_df):,}")
+        if not chunk_files:
+            print("No chunk files available! Exiting.")
+            exit()
         
-        # Save raw data (filtered version)
-        random_str = "".join(random.choices(string.ascii_letters + string.digits, k=8))
-        filename = Path(os.getcwd()) / f"comparison_{random_str}.xlsx"
-        combined_df.to_excel(filename, index=False, engine="xlsxwriter", engine_kwargs={'options': {'strings_to_urls': False}})
-        print(f"Filtered raw data saved to: {filename}")
+        # STEP 2: Process chunks incrementally
+        print(f"\nProcessing {len(chunk_files)} chunk files...")
+        combined_df = process_chunk_files(chunk_files, FOCAL_COUNTRIES, EVENT_CODES)
         
-        # Calculate daily scores
-        daily_scores = calculate_negativity_scores(combined_df, FOCAL_COUNTRIES, YEAR)
+        if combined_df.empty:
+            print("No data after processing! Exiting.")
+            exit()
         
-        # Create PDF report
+        # STEP 3: Calculate scores incrementally
+        print(f"\nCalculating scores for {len(combined_df):,} events...")
+        daily_scores = calculate_negativity_scores_incremental(combined_df, FOCAL_COUNTRIES, YEAR)
+        
+        if daily_scores.empty:
+            print("No scores calculated! Exiting.")
+            exit()
+        
+        # STEP 4: Create PDF report
+        print("\nCreating PDF report...")
         pdf_path = create_comparison_pdf_report(daily_scores, FOCAL_COUNTRIES, YEAR, top_common=10)
         
-        # Print summary
-        print(f"\nComparison summary for {FOCAL_COUNTRIES[0]} vs {FOCAL_COUNTRIES[1]} in {YEAR}:")
-        common_df = find_common_counterparts(daily_scores, FOCAL_COUNTRIES)
-        if not common_df.empty:
-            common_df = common_df.sort_values('total_negativity', ascending=False)
-            for i, row in common_df.head(5).iterrows():
-                print(f"{i+1}. {row['counterpart']}: "
-                      f"{FOCAL_COUNTRIES[0]} negativity={row[f'{FOCAL_COUNTRIES[0]}_avg_negativity']:.3f}, "
-                      f"{FOCAL_COUNTRIES[1]} negativity={row[f'{FOCAL_COUNTRIES[1]}_avg_negativity']:.3f}")
+        # STEP 5: Save final results
+        random_str = "".join(random.choices(string.ascii_letters + string.digits, k=8))
         
-        # Save daily scores for correlation with cyber attacks
-        daily_scores.to_csv(f'{"_".join(FOCAL_COUNTRIES)}_negativity_scores_{YEAR}.csv', index=False)
-        print(f"\nDaily negativity scores saved to {'_'.join(FOCAL_COUNTRIES)}_negativity_scores_{YEAR}.csv")
+        # Save combined data
+        combined_filename = Path(os.getcwd()) / f"combined_data_{random_str}.pkl"
+        combined_df.to_pickle(combined_filename)
+        print(f"Combined data saved to: {combined_filename}")
+        
+        # Save daily scores
+        scores_filename = f'{"_".join(FOCAL_COUNTRIES)}_negativity_scores_{YEAR}_{random_str}.csv'
+        daily_scores.to_csv(scores_filename, index=False)
+        print(f"Daily scores saved to: {scores_filename}")
+        
+        # Print summary
+        print(f"\nProcessing complete!")
+        print(f"Total events processed: {len(combined_df):,}")
+        print(f"Daily scores calculated: {len(daily_scores):,}")
+        
+        # Ask about cleanup
+        cleanup = input("\nDo you want to keep the chunk files for future use? (y/n): ")
+        if cleanup.lower() != 'y':
+            print("Cleaning up temporary files...")
+            cleanup_temp_files(chunk_files)
+        else:
+            print("Chunk files preserved in 'temp_data' folder")
         
     except KeyboardInterrupt:
-        print("\n\nDownload interrupted by user! Exiting gracefully...")
+        print("\n\nProcess interrupted by user! Exiting gracefully...")
+        # Don't clean up chunks on interrupt so they can be reused
+        print("Chunk files preserved for future use")
     except Exception as e:
         print(f"\n\nError during execution: {e}")
+        import traceback
+        traceback.print_exc()
+        print("Chunk files preserved for debugging")
