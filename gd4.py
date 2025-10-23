@@ -16,6 +16,10 @@ import signal
 import sys
 import random
 import string
+#remove warning
+pd.options.mode.chained_assignment = None  # default='warn'
+
+
 
 # FIPS to country name mapping
 FIPS_TO_ISO2 = {'AF': 'AFGHANISTAN','AL': 'ALBANIA','AG': 'ALGERIA','AQ': 'AMERICAN SAMOA','AN': 'ANDORRA','AO': 'ANGOLA','AV': 'ANGUILLA','AY': 'ANTARCTICA','AC': 'ANTIGUA AND BARBUDA','AR': 'ARGENTINA','AM': 'ARMENIA','AA': 'ARUBA','AT': 'ASHMORE AND CARTIER ISLANDS','AS': 'AUSTRALIA','AU': 'AUSTRIA','AJ': 'AZERBAIJAN','BF': 'BAHAMAS, THE','BA': 'BAHRAIN','FQ': 'BAKER ISLAND','BG': 'BANGLADESH','BB': 'BARBADOS','BS': 'BASSAS DA INDIA','BO': 'BELARUS','BE': 'BELGIUM','BH': 'BELIZE','BN': 'BENIN','BD': 'BERMUDA','BT': 'BHUTAN','BL': 'BOLIVIA','BK': 'BOSNIA AND HERZEGOVINA','BC': 'BOTSWANA','BV': 'BOUVET ISLAND','BR': 'BRAZIL','IO': 'BRITISH INDIAN OCEAN TERRITORY','VI': 'BRITISH VIRGIN ISLANDS','BX': 'BRUNEI','BU': 'BULGARIA','UV': 'BURKINA','BM': 'BURMA','BY': 'BURUNDI','CB': 'CAMBODIA','CM': 'CAMEROON','CA': 'CANADA','CV': 'CAPE VERDE','CJ': 'CAYMAN ISLANDS','CT': 'CENTRAL AFRICAN REPUBLIC','CD': 'CHAD','CI': 'CHILE','CH': 'CHINA','KT': 'CHRISTMAS ISLAND','IP': 'CLIPPERTON ISLAND','CK': 'COCOS (KEELING) ISLANDS','CO': 'COLOMBIA','CN': 'COMOROS','CF': 'CONGO','CW': 'COOK ISLANDS','CR': 'CORAL SEA ISLANDS','CS': 'COSTA RICA','IV': 'COTE DIVOIRE','HR':'CROATIA','CU': 'CUBA','CY': 'CYPRUS','EZ': 'CZECH REPUBLIC','DA': 'DENMARK','DJ': 'DJIBOUTI','DO': 'DOMINICA','DR': 'DOMINICAN REPUBLIC','EC': 'ECUADOR','EG': 'EGYPT','ES': 'EL SALVADOR','EK': 'EQUATORIAL GUINEA','ER': 'ERITREA','EN': 'ESTONIA','ET': 'ETHIOPIA','EU': 'EUROPA ISLAND','FK': 'FALKLAND ISLANDS (ISLAS MALVINAS)','FO': 'FAROE ISLANDS','FM': 'FEDERATED STATES OF MICRONESIA','FJ': 'FIJI','FI': 'FINLAND','FR': 'FRANCE','FG': 'FRENCH GUIANA','FP': 'FRENCH POLYNESIA','FS': 'FRENCH SOUTHERN AND ANTARCTIC LANDS','GB': 'GABON','GA': 'GAMBIA, THE','GZ': 'GAZA STRIP','GG': 'GEORGIA','GM': 'GERMANY state/land','GH': 'GHANA','GI': 'GIBRALTAR','GO': 'GLORIOSO ISLANDS','GR': 'GREECE','GL': 'GREENLAND','GJ': 'GRENADA','GP': 'GUADELOUPE','GQ': 'GUAM','GT': 'GUATEMALA','GK': 'GUERNSEY','GV': 'GUINEA','PU': 'GUINEA-BISSAU','GY': 'GUYANA','HA': 'HAITI','HM': 'HEARD ISLAND AND MCDONALD ISLANDS','HO': 'HONDURAS','HK': 'HONG KONG','HQ': 'HOWLAND ISLAND','HU': 'HUNGARY','IC': 'ICELAND','IN': 'INDIA','ID': 'INDONESIA','IR': 'IRAN','IZ': 'IRAQ','EI': 'IRELAND','IS': 'ISRAEL','IT': 'ITALY','JM': 'JAMAICA','JN': 'JAN MAYEN','JA': 'JAPAN','DQ': 'JARVIS ISLAND','JE': 'JERSEY','JQ': 'JOHNSTON ATOLL','JO': 'JORDAN','JU': 'JUAN DE NOVA ISLAND','KZ': 'KAZAKHSTAN','KE': 'KENYA','KQ': 'KINGMAN REEF','KR': 'KIRIBATI','KN': 'KOREA, DEMOCRATIC PEOPLES REPUBLIC OF','KS': 'KOREA, REPUBLIC OF','KU': 'KUWAIT','KG': 'KYRGYZSTAN ','LA': 'LAOS','LG': 'LATVIA','LE': 'LEBANON','LT': 'LESOTHO','LI': 'LIBERIA','LY': 'LIBYA','LS': 'LIECHTENSTEIN','LH': 'LITHUANIA','LU': 'LUXEMBOURG','MC': 'MACAU','MK': 'MACEDONIA','MA': 'MADAGASCAR','MI': 'MALAWI','MY': 'MALAYSIA','MV': 'MALDIVES','ML': 'MALI','MT': 'MALTA','IM': 'MAN, ISLE OF','RM': 'MARSHALL ISLANDS','MB': 'MARTINIQUE','MR': 'MAURITANIA','MP': 'MAURITIUS','MF': 'MAYOTTE','MX': 'MEXICO','MQ': 'MIDWAY ISLANDS','MD': 'MOLDOVA','MN': 'MONACO','MG': 'MONGOLIA','MW': 'MONTENEGRO','MH': 'MONTSERRAT','MO': 'MOROCCO','MZ': 'MOZAMBIQUE','WA': 'NAMIBIA','NR': 'NAURU','BQ': 'NAVASSA ISLAND','NP': 'NEPAL','NL': 'NETHERLANDS','NT': 'NETHERLANDS ANTILLES','NC': 'NEW CALEDONIA','NZ': 'NEW ZEALAND','NU': 'NICARAGUA','NG': 'NIGER','NI': 'NIGERIA','NE': 'NIUE','NF': 'NORFOLK ISLAND','CQ': 'NORTHERN MARIANA ISLANDS','NO': 'NORWAY','MU': 'OMAN','PK': 'PAKISTAN','LQ': 'PALMYRA ATOLL','PM': 'PANAMA','PP': 'PAPUA NEW GUINEA','PF': 'PARACEL ISLANDS','PA': 'PARAGUAY','PE': 'PERU','RP': 'PHILIPPINES','PC': 'PITCAIRN ISLANDS','PL': 'POLAND','PO': 'PORTUGAL','RQ': 'PUERTO RICO','QA': 'QATAR','RE': 'REUNION','RO': 'ROMANIA','RS': 'RUSSIA','RW': 'RWANDA','SC': 'ST. KITTS AND NEVIS','SH': 'ST. HELENA','ST': 'ST. LUCIA','SB': 'ST. PIERRE AND MIQUELON','VC': 'ST. VINCENT AND THE GRENADINES','SM': 'SAN MARINO','TP': 'SAO TOME AND PRINCIPE','SA': 'SAUDI ARABIA','SG': 'SENEGAL','SR': 'SERBIA','SE': 'SEYCHELLES','SL': 'SIERRA LEONE','SN': 'SINGAPORE','LO': 'SLOVAKIA','SI': 'SLOVENIA','BP': 'SOLOMON ISLANDS','SO': 'SOMALIA','SF': 'SOUTH AFRICA','SX': 'SOUTH GEORGIA AND THE SOUTH SANDWICH ISLANDS','SP': 'SPAIN','PG': 'SPRATLY ISLANDS','CE': 'SRI LANKA','SU': 'SUDAN','NS': 'SURINAME','SV': 'SVALBARD','WZ': 'SWAZILAND','SW': 'SWEDEN','SZ': 'SWITZERLAND','SY': 'SYRIA','TI': 'TAJIKISTAN','TZ': 'TANZANIA','TH': 'THAILAND','TO': 'TOGO','TL': 'TOKELAU','TN': 'TONGA','TD': 'TRINIDAD AND TOBAGO','TE': 'TROMELIN ISLAND','PS': 'TRUST TERRITORY OF THE PACIFIC ISLANDS (PALAU)','TS': 'TUNISIA','TU': 'TURKEY','TX': 'TURKMENISTAN','TK': 'TURKS AND CAICOS ISLANDS','TV': 'TUVALU','UG': 'UGANDA','UP': 'UKRAINE','TC': 'UNITED ARAB EMIRATES','UK': 'UNITED KINGDOM','UK': 'UNITED KINGDOM','UK': 'UNITED KINGDOM','UK': 'UNITED KINGDOM','US': 'UNITED STATES','UY': 'URUGUAY','UZ': 'UZBEKISTAN','NH': 'VANUATU','VT': 'VATICAN CITY','VE': 'VENEZUELA','VM': 'VIETNAM','VQ': 'VIRGIN ISLANDS','WQ': 'WAKE ISLAND','WF': 'WALLIS AND FUTUNA','WE': 'WEST BANK','WI': 'WESTERN SAHARA','WS': 'WESTERN SAMOA','YM': 'YEMEN','CG': 'ZAIRE','ZA': 'ZAMBIA','ZI': 'ZIMBABWE','TW': 'TAIWAN'}
@@ -23,14 +27,14 @@ FIPS_TO_ISO2 = {'AF': 'AFGHANISTAN','AL': 'ALBANIA','AG': 'ALGERIA','AQ': 'AMERI
 # Global variable to track interruption
 interrupted = False
 
-year=2025
-start_month=1 
-start_day=1
-end_month=10 
-end_day=19
-start_date = datetime(year, start_month, start_day)
-end_date = datetime(year, end_month, end_day)
-current_date = start_date
+year=2024
+#start_month=1 
+#start_day=1
+#end_month=12
+#end_day=31
+##start_date = datetime(year, start_month, start_day)
+#end_date = datetime(year, end_month, end_day)
+#current_date = start_date
 
 def signal_handler(sig, frame):
     """Handle Ctrl+C interruption gracefully"""
@@ -116,11 +120,11 @@ def download_gdelt_data_direct():
     temp_dir = 'temp_data_direct'
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
-    year=2025
+    year=2024
     start_month=1
     start_day=1
-    end_month=10 
-    end_day=19
+    end_month=12
+    end_day=31
     start_date = datetime(year, start_month, start_day)
     end_date = datetime(year, end_month, end_day)
     current_date = start_date
@@ -203,8 +207,8 @@ def main():
     print("\nSTEP 1: Initializing parameters...")
     
     # Fixed parameters
-    YEAR = 2025  # Using 2024 for actual data
-    FOCAL_COUNTRIES = ['UK']  # Countries we're analyzing
+    YEAR = year  # Using 2024 for actual data
+    FOCAL_COUNTRIES = ['RS','IZ','IS','US', 'FR', 'UK', 'IT','SP']  # Countries we're analyzing
     
     # Event codes to filter for (political/diplomatic events)
     EVENT_CODES = ['012','016','0212','0214','0232','0233','0234','0243','0244','0252','0253','0254','0255','0256','026','027','028','0312','0314','032','0332','0333','0334','0354','0355','0356','036','037','038','039','046','050','051','052','053','054','055','056','057','06','060','061','062','063','064','071','072','073','074','075','0811','0812','0813','0814','082','083','0831','0832','0833','0834','0841','085','086','0861','0862','0863','087','0871','0872','0873','0874','092','093','094','1012','1014','102','1032','1033','1034','1041','1042','1043','1044','1052','1054','1055','1056','106','107','108','111','1121','1122','1123','1124','1125','113','114','115','116','121','1211','1212','122','1221','1222','1223','1224','123','1231','1232','1233','1234','124','1241','1242','1243','1244','1245','1246','125','126','127','128','129','130','131','1311','1312','1313','132','1321','1322','1323','1324','133','134','135','136','137','138','1381','1382','1383','1384','1385','139','140','141','1411','1412','1413','1414','142','1421','1422','1423','1424','143','1431','1432','1433','1434','144','1441','1442','1443','1444','145','1451','1452','1453','1454','150','151','152','153','154','155','16','160','161','162','1621','1622','1623','163','164','165','166','1661','1662','1663','1712','1721','1722','1723','1724','174','175','180','181','182','1821','1822','1823','183','1831','1832','1833','1834','184','185','186','190','191','192','193','194','195','1951','1952','196','200','201','202','203','204','2041','2042']
@@ -217,7 +221,7 @@ def main():
     print("\nSTEP 2: Selecting counterpart countries...")
 
     # Default selection
-    default_counterparts = ['RS', 'IZ','IS']
+    default_counterparts = ['RS','IZ','IS','US', 'FR', 'UK', 'IT','SP']
     print(f"Default counterparts: {', '.join(default_counterparts)}")
 
     # Simple user input
@@ -448,8 +452,8 @@ def main():
             rel_data = country_data[country_data['RelationshipPair'] == relationship].copy()
             rel_data = rel_data.sort_values('Date')
             
-            # Use 7-day rolling window
-            window = min(7, len(rel_data))
+            # Use 28-day rolling window
+            window = min(28, len(rel_data))
             
             # Calculate rolling statistics
             rel_data['AvgTone_Rolling_Mean'] = rel_data['Daily_AvgTone'].rolling(window, min_periods=1).mean()
@@ -790,6 +794,7 @@ def main():
     scores_filename = f'daily_scores_{YEAR}_{random_str}.csv'
     daily_scores.to_csv(scores_filename, index=False)
     print(f"✓ Daily scores saved to: {scores_filename}")
+    print(daily_scores)
 
     # STEP 8: SUMMARY
     print("\n" + "="*70)
