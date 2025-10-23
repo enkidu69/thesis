@@ -123,8 +123,8 @@ def download_gdelt_data_direct():
     year=2024
     start_month=1
     start_day=1
-    end_month=12
-    end_day=31
+    end_month=1
+    end_day=1
     start_date = datetime(year, start_month, start_day)
     end_date = datetime(year, end_month, end_day)
     current_date = start_date
@@ -347,6 +347,7 @@ def main():
                     
                     df_filtered['RelationshipPair'] = df_filtered.apply(get_relationship_pair, axis=1)
                     df_filtered['FocalCountry'] = focal_country
+
                     
                     # Convert date to proper format
                     df_filtered['Date'] = pd.to_datetime(df_filtered['SQLDATE'].astype(str), format='%Y%m%d', errors='coerce')
@@ -388,11 +389,14 @@ def main():
         counterpart_filter = False
         for focal_country in FOCAL_COUNTRIES:
             for counterpart in selected_counterparts:
+                
                 relationship = f"{focal_country}-{counterpart}"
                 counterpart_filter |= (combined_df['RelationshipPair'] == relationship)
-        
+
+
         before_filter = len(combined_df)
         combined_df = combined_df[counterpart_filter].copy()
+        
         print(f"✓ Filtered to {len(combined_df):,} events (from {before_filter:,})")
         
         # Final date range check
@@ -480,6 +484,12 @@ def main():
     if interrupted:
         print("Score calculation interrupted!")
         return
+    #remove first 3 chars from rel pair to retrieve counterpart
+    daily_scores['Counterpart'] = daily_scores['RelationshipPair'].str[3:]
+    #print(daily_scores['Counterpart'])
+    #create a new rel pair that is unique per pair
+    
+    daily_scores['newrel']=np.where(daily_scores['Counterpart']<daily_scores['FocalCountry'],daily_scores['Counterpart']+daily_scores['FocalCountry'],daily_scores['FocalCountry']+daily_scores['Counterpart'] )
 
     print(f"✓ Calculated scores for {len(daily_scores)} daily relationships")
 
@@ -509,7 +519,7 @@ def main():
             # PAGE 1: Overview - Focus on showing different colors for FR and UK clearly
             print("Creating overview page...")
             fig, axes = plt.subplots(2, 2, figsize=(16, 12))  # Larger figure for better visibility
-            fig.suptitle(f'Bilateral Analysis: {" vs ".join(FOCAL_COUNTRIES)} ({YEAR})\nTime Period: {start_date.strftime("%Y-%m-%d")} to {end_date.strftime("%Y-%m-%d")}', 
+            fig.suptitle(f'Bilateral Analysis: {" vs ".join(FOCAL_COUNTRIES)} ({YEAR})\nTime Period', 
                         fontsize=16, fontweight='bold')
             
             # Get the full date range for setting x-axis limits
@@ -787,14 +797,14 @@ def main():
 
     # Save combined data with random string
     combined_filename = f"combined_data_{YEAR}_{random_str}.pkl"
-    combined_df.to_pickle(combined_filename)
+    #combined_df.to_pickle(combined_filename)
     print(f"✓ Combined data saved to: {combined_filename}")
 
     # Save daily scores with random string
     scores_filename = f'daily_scores_{YEAR}_{random_str}.csv'
     daily_scores.to_csv(scores_filename, index=False)
     print(f"✓ Daily scores saved to: {scores_filename}")
-    print(daily_scores)
+
 
     # STEP 8: SUMMARY
     print("\n" + "="*70)
