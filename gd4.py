@@ -16,6 +16,9 @@ import signal
 import sys
 import random
 import string
+import time
+#measure exec time
+start_time = time.time()
 #remove warning
 pd.options.mode.chained_assignment = None  # default='warn'
 
@@ -27,7 +30,7 @@ FIPS_TO_ISO2 = {'AF': 'AFGHANISTAN','AL': 'ALBANIA','AG': 'ALGERIA','AQ': 'AMERI
 # Global variable to track interruption
 interrupted = False
 
-year=2024
+syear=2023
 #start_month=1 
 #start_day=1
 #end_month=12
@@ -120,13 +123,14 @@ def download_gdelt_data_direct():
     temp_dir = 'temp_data_direct'
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
-    year=2024
+    syear=2023
     start_month=1
     start_day=1
-    end_month=1
-    end_day=1
-    start_date = datetime(year, start_month, start_day)
-    end_date = datetime(year, end_month, end_day)
+    eyear=2024
+    end_month=10
+    end_day=23
+    start_date = datetime(syear, start_month, start_day)
+    end_date = datetime(eyear, end_month, end_day)
     current_date = start_date
     
     daily_files = []
@@ -207,7 +211,7 @@ def main():
     print("\nSTEP 1: Initializing parameters...")
     
     # Fixed parameters
-    YEAR = year  # Using 2024 for actual data
+    YEAR = syear  # Using 2024 for actual data
     FOCAL_COUNTRIES = ['RS','IZ','IS','US', 'FR', 'UK', 'IT','SP']  # Countries we're analyzing
     
     # Event codes to filter for (political/diplomatic events)
@@ -441,7 +445,7 @@ def main():
     }).reset_index()
 
     # Filter by year
-    daily_relationships = daily_relationships[daily_relationships['Date'].dt.year == YEAR]
+    #daily_relationships = daily_relationships[daily_relationships['Date'].dt.year == YEAR]
 
     # Calculate scores for each relationship
     daily_scores = pd.DataFrame()
@@ -824,7 +828,7 @@ def main():
 
     print(f"✓ Report generated: {pdf_path}")
     print(f"✓ Data files saved: {combined_filename}, {scores_filename}")
-
+    print("--- %s seconds ---" % (time.time() - start_time))
 
 # Run the sequential analysis
 if __name__ == "__main__":
