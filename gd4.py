@@ -30,12 +30,13 @@ FIPS_TO_ISO2 = {'AF': 'AFGHANISTAN','AL': 'ALBANIA','AG': 'ALGERIA','AQ': 'AMERI
 # Global variable to track interruption
 interrupted = False
 
-syear=2023
+syear=2025
+year=syear
 #start_month=1 
 #start_day=1
 #end_month=12
 #end_day=31
-##start_date = datetime(year, start_month, start_day)
+#start_date = datetime(year, start_month, start_day)
 #end_date = datetime(year, end_month, end_day)
 #current_date = start_date
 
@@ -123,10 +124,10 @@ def download_gdelt_data_direct():
     temp_dir = 'temp_data_direct'
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
-    syear=2023
+    syear=2025
     start_month=1
     start_day=1
-    eyear=2024
+    eyear=2025
     end_month=10
     end_day=23
     start_date = datetime(syear, start_month, start_day)
@@ -157,8 +158,9 @@ def download_gdelt_data_direct():
             
             if df_daily is not None and len(df_daily) > 0:
                 # Filter to essential columns immediately to save memory
+                #replaced SQLDATE with DATEADDED, as SQL date was wrong
                 essential_columns = ['GLOBALEVENTID',
-                    'SQLDATE', 'SOURCEURL', 'Actor1Geo_CountryCode', 'Actor2Geo_CountryCode',
+                    'DATEADDED', 'SOURCEURL', 'Actor1Geo_CountryCode', 'Actor2Geo_CountryCode',
                     'EventRootCode', 'EventBaseCode', 'EventCode', 'GoldsteinScale', 
                     'AvgTone', 'NumMentions', 'NumArticles', 'NumSources'
                 ]
@@ -334,7 +336,7 @@ def main():
 #######################print(EVENT_CODES) REMOVED TEMPORAROY
                     #df_filtered = df_filtered[df_filtered['EventBaseCode'].isin(EVENT_CODES)]
                     #print(df_filtered)
-                    #Data=Data[Data["EventCode"].astype(int).isin(scodes)]
+                    df_filtered=df_filtered[df_filtered["EventCode"].astype(str).isin(EVENT_CODES)]
                     if len(df_filtered) > 0:
                         # Create relationship column
                         def get_relationship_pair(row):
@@ -354,7 +356,7 @@ def main():
 
                     
                     # Convert date to proper format
-                    df_filtered['Date'] = pd.to_datetime(df_filtered['SQLDATE'].astype(str), format='%Y%m%d', errors='coerce')
+                    df_filtered['Date'] = pd.to_datetime(df_filtered['DATEADDED'].astype(str), format='%Y%m%d', errors='coerce')
                     
                     # Drop rows with invalid dates
                     df_filtered = df_filtered.dropna(subset=['Date'])
@@ -419,8 +421,10 @@ def main():
     if len(combined_df) == 0:
         print("✗ No data to calculate scores!")
         return
-
-    # Group data by date, country, and relationship
+    #combined_df=combined_df[combined_df["EventCode"].astype(str).isin(EVENT_CODES)]
+    #print(combined_df["EventCode"])
+    #exit()
+    # Group data by dacombined_dfte, country, and relationship
     daily_relationships = combined_df.groupby(['Date', 'FocalCountry', 'RelationshipPair']).agg({
         'AvgTone': ['mean', 'std', 'count'],
         'GoldsteinScale': ['mean', 'std'],
