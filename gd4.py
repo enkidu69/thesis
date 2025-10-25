@@ -330,10 +330,9 @@ def main():
                 
                 # Filter by event codes
                 if EVENT_CODES and len(df_filtered) > 0:
-#######################print(EVENT_CODES) REMOVED TEMPORAROY
-                    #df_filtered = df_filtered[df_filtered['EventBaseCode'].isin(EVENT_CODES)]
+#######################print(EVENT_CODES)
                     #print(df_filtered)
-                    #df_filtered=df_filtered[df_filtered["EventCode"].astype(str).isin(EVENT_CODES)]
+                    df_filtered=df_filtered[df_filtered["EventCode"].astype(str).isin(EVENT_CODES)]
                     if len(df_filtered) > 0:
                         # Create relationship column
                         def get_relationship_pair(row):
@@ -444,7 +443,7 @@ def main():
         'NumArticles_sum': 'Daily_NumArticles',
         'NumSources_sum': 'Daily_NumSources'
     }).reset_index()
-
+    
     # Filter by year
     #daily_relationships = daily_relationships[daily_relationships['Date'].dt.year == YEAR]
 
@@ -505,337 +504,102 @@ def main():
     scores_filename = f'daily_scores_{YEAR}_{random_str}.csv'
     daily_scores.to_csv(scores_filename, index=False)
     print(f"✓ Daily scores saved to: {scores_filename}")
+    #filter by negative zscore
+    
+    daily_scores1=daily_scores[daily_scores['Tone_Article_ZScore']<0]
+    scores_filename = f'NEG_{YEAR}_{random_str}.csv'
+    daily_scores1.to_csv(scores_filename, index=False)
+    
+    #group by date, 10 lowsest zscore per day    
+    min_10_with_all_columns = daily_scores.loc[daily_scores.groupby('Date')['Tone_Article_ZScore'].nsmallest(10).index.get_level_values(1)]
+    
+    #print(min_10_with_all_columns)
+    min_filename = f'MIN_{YEAR}_{random_str}.csv'
+    #min_10_with_all_columns.to_csv(min_filename, index=False)
+    
+    # Read the Excel file
+    df = pd.read_excel('Cyber Events Database - 2014-2024 + Jan_Aug_Sept 2025.xlsx', sheet_name='Sheet 1')
+
+    # Convert event_date to datetime if it's not already
+    df['event_date'] = pd.to_datetime(df['event_date'], format='%d-%m-%Y').dt.date
+
+    # Aggregate by the specified columns and concatenate descriptions
+    aggregated_df = df.groupby(['event_date', 'motive', 'event_type', 'country', 'actor_country']).agg({
+        'description': lambda x: ' | '.join(x.astype(str)),
+        'slug': 'count'  # Count number of events in each group
+    }).reset_index()
+
+    # Rename the count column
+    aggregated_df = aggregated_df.rename(columns={'slug': 'event_count'})
+    print(aggregated_df)
+    # Display the aggregated data
+    print(aggregated_df.head())
+    print(f"\nTotal aggregated events: {len(aggregated_df)}")
+    print(f"Original events: {len(df)}")
+
+    # Optional: Save to new Excel file
+
+    # Make sure date columns are in the same format
+    #aggregated_df['event_date'] = pd.to_datetime(aggregated_df['event_date']).dt.date
+    #daily_scores['Date'] = pd.to_datetime(daily_scores['Date']).dt.date
+
+
+    import pycountry
+
+    def country_to_fips(country_name):
+        """Convert country name to FIPS code"""
+        if pd.isna(country_name):
+            return None
+        
+        try:
+            # Try to find the country
+            country = pycountry.countries.get(name=country_name)
+            if country:
+                # Pycountry uses alpha_2 codes, FIPS is similar but not identical
+                # You may need a mapping table for exact FIPS codes
+                return country.alpha_2
+        except:
+            pass
+        
+        # Manual mapping for common discrepancies
+        manual_map = {
+            'United States of America': 'US',
+            'United Kingdom of Great Britain and Northern Ireland': 'UK',
+            'Russian Federation': 'RS',
+            'Korea (the Republic of)': 'KR',
+            'Iran (Islamic Republic of)': 'IR',
+            'Venezuela (Bolivarian Republic of)': 'VE',
+            'Syrian Arab Republic': 'SY',
+            'Czechia': 'CZ',
+            'Undetermined': 'XX',
+            'Moldova (the Republic of)': 'MD'
+        }
+        
+        return manual_map.get(country_name, None)
+
+    aggregated_df['country_fips'] = aggregated_df['country'].apply(country_to_fips)
+    # Merge on date and country
+    daily_scores['Date'] = pd.to_datetime(daily_scores['Date'], format='%d-%m-%Y').dt.date
+    merged_df = pd.merge(
+        daily_scores,
+        aggregated_df,
+        left_on=['Date', 'FocalCountry'],
+        right_on=['event_date', 'country_fips'],
+        how='left'  # Use 'left' to keep all daily_scores records, 'inner' for only matches
+    )
+
+    print(f"Merged dataset shape: {merged_df.shape}")
+    print(f"Daily scores records: {len(daily_scores)}")
+    #print(f"Merged records with cyber events: {merged_df[merged_df['event_count'].notna()].shape[0]}")
+    merged_df.to_excel('aggregated_cyber_events.xlsx', index=False)
     exit()
     
     
 
-    # STEP 6: CREATE VISUALIZATION REPORT
-
-    
-    country_str = '_'.join(FOCAL_COUNTRIES)
-    pdf_path = os.path.join(f'{country_str}_Analysis_{YEAR}_{random_str}.pdf')
-
-    print(f"PDF will be saved as: {pdf_path}")
-
-    # Create color palette for focal countries (distinct colors)
-    focal_colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
-    focal_color_dict = dict(zip(FOCAL_COUNTRIES, focal_colors[:len(FOCAL_COUNTRIES)]))
-
-    # Create line styles for counterparts
-    counterpart_styles = ['-', '--', '-.', ':']
-    counterpart_style_dict = {}
-    for i, counterpart in enumerate(selected_counterparts):
-        counterpart_style_dict[counterpart] = counterpart_styles[i % len(counterpart_styles)]
-
-    try:
-        with PdfPages(pdf_path) as pdf:
-            plt.style.use('default')
-            
-            # PAGE 1: Overview - Focus on showing different colors for FR and UK clearly
-            print("Creating overview page...")
-            fig, axes = plt.subplots(2, 2, figsize=(16, 12))  # Larger figure for better visibility
-            fig.suptitle(f'Bilateral Analysis: {" vs ".join(FOCAL_COUNTRIES)} ({YEAR})\nTime Period', 
-                        fontsize=16, fontweight='bold')
-            
-            # Get the full date range for setting x-axis limits
-            if not daily_scores.empty:
-                min_date = daily_scores['Date'].min()
-                max_date = daily_scores['Date'].max()
-            else:
-                min_date = start_date
-                max_date = end_date
-            
-            # Plot 1: Negativity Scores - Different colors for focal countries
-            for counterpart in selected_counterparts:
-                for focal_country in FOCAL_COUNTRIES:
-                    rel_data = daily_scores[
-                        (daily_scores['FocalCountry'] == focal_country) & 
-                        (daily_scores['RelationshipPair'] == f"{focal_country}-{counterpart}")
-                    ]
-                    if not rel_data.empty:
-                        color = focal_color_dict[focal_country]
-                        linestyle = counterpart_style_dict[counterpart]
-                        line = axes[0, 0].plot(rel_data['Date'], rel_data['Negativity_Score'], 
-                                             label=f'{focal_country}-{counterpart}', 
-                                             color=color, linestyle=linestyle, linewidth=2.5)
-            
-            axes[0, 0].set_title('Daily Negativity Scores\n(Higher = More Negative)', fontweight='bold', fontsize=12)
-            axes[0, 0].set_ylabel('Negativity Score', fontsize=10)
-            axes[0, 0].set_xlim([min_date, max_date])  # Ensure full time period is visible
-            axes[0, 0].xaxis.set_major_locator(plt.MaxNLocator(8))  # Reasonable number of date labels
-            axes[0, 0].tick_params(axis='x', rotation=45)
-            axes[0, 0].legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
-            axes[0, 0].grid(True, alpha=0.3)
-            
-            # Plot 2: Tone-Article Impact Z-Score - Different colors for focal countries
-            for counterpart in selected_counterparts:
-                for focal_country in FOCAL_COUNTRIES:
-                    rel_data = daily_scores[
-                        (daily_scores['FocalCountry'] == focal_country) & 
-                        (daily_scores['RelationshipPair'] == f"{focal_country}-{counterpart}")
-                    ]
-                    if not rel_data.empty:
-                        color = focal_color_dict[focal_country]
-                        linestyle = counterpart_style_dict[counterpart]
-                        axes[0, 1].plot(rel_data['Date'], rel_data['Tone_Article_ZScore'], 
-                                       label=f'{focal_country}-{counterpart}', 
-                                       color=color, linestyle=linestyle, linewidth=2.5)
-            
-            axes[0, 1].set_title('Tone-Article Impact Z-Score\n(Z-score of Tone × Articles)', fontweight='bold', fontsize=12)
-            axes[0, 1].set_ylabel('Z-Score', fontsize=10)
-            axes[0, 1].set_xlim([min_date, max_date])  # Ensure full time period is visible
-            axes[0, 1].axhline(y=0, color='black', linestyle='--', alpha=0.7, label='Mean')
-            axes[0, 1].axhline(y=2, color='red', linestyle=':', alpha=0.7, label='+2 Std Dev')
-            axes[0, 1].axhline(y=-2, color='red', linestyle=':', alpha=0.7, label='-2 Std Dev')
-            axes[0, 1].xaxis.set_major_locator(plt.MaxNLocator(8))
-            axes[0, 1].tick_params(axis='x', rotation=45)
-            axes[0, 1].legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
-            axes[0, 1].grid(True, alpha=0.3)
-            
-            # Plot 3: Event Counts by Focal Country (separate bars for each focal country)
-            event_counts_by_focal = {}
-            for focal_country in FOCAL_COUNTRIES:
-                event_counts_by_focal[focal_country] = []
-                for counterpart in selected_counterparts:
-                    rel_data = daily_scores[
-                        (daily_scores['FocalCountry'] == focal_country) & 
-                        (daily_scores['RelationshipPair'] == f"{focal_country}-{counterpart}")
-                    ]
-                    total_events = rel_data['Daily_EventCount'].sum() if not rel_data.empty else 0
-                    event_counts_by_focal[focal_country].append(total_events)
-            
-            # Create grouped bar chart to clearly show focal country differences
-            x_pos = np.arange(len(selected_counterparts))
-            bar_width = 0.35
-            
-            for i, focal_country in enumerate(FOCAL_COUNTRIES):
-                color = focal_color_dict[focal_country]
-                offset = i * bar_width
-                axes[1, 0].bar(x_pos + offset, event_counts_by_focal[focal_country], bar_width, 
-                              label=focal_country, color=color, alpha=0.8)
-            
-            axes[1, 0].set_title('Total Event Count by Counterpart and Focal Country', fontweight='bold', fontsize=12)
-            axes[1, 0].set_ylabel('Total Events', fontsize=10)
-            axes[1, 0].set_xlabel('Counterparts', fontsize=10)
-            axes[1, 0].set_xticks(x_pos + bar_width * (len(FOCAL_COUNTRIES) - 1) / 2)
-            axes[1, 0].set_xticklabels(selected_counterparts)
-            axes[1, 0].tick_params(axis='x', rotation=45)
-            axes[1, 0].legend()
-            axes[1, 0].grid(True, alpha=0.3, axis='y')
-            
-            # Plot 4: Average Tone Comparison - Clear focal country comparison
-            avg_tone_by_focal = {}
-            for focal_country in FOCAL_COUNTRIES:
-                avg_tone_by_focal[focal_country] = []
-                tone_labels = []
-                for counterpart in selected_counterparts:
-                    rel_data = daily_scores[
-                        (daily_scores['FocalCountry'] == focal_country) & 
-                        (daily_scores['RelationshipPair'] == f"{focal_country}-{counterpart}")
-                    ]
-                    if not rel_data.empty:
-                        avg_tone = rel_data['Daily_AvgTone'].mean()
-                        avg_tone_by_focal[focal_country].append(avg_tone)
-                    else:
-                        avg_tone_by_focal[focal_country].append(0)
-            
-            # Create grouped bar chart for average tone
-            for i, focal_country in enumerate(FOCAL_COUNTRIES):
-                color = focal_color_dict[focal_country]
-                offset = i * bar_width
-                axes[1, 1].bar(x_pos + offset, avg_tone_by_focal[focal_country], bar_width, 
-                              label=focal_country, color=color, alpha=0.8)
-            
-            axes[1, 1].set_title('Average Tone by Counterpart and Focal Country', fontweight='bold', fontsize=12)
-            axes[1, 1].set_ylabel('Average Tone', fontsize=10)
-            axes[1, 1].set_xlabel('Counterparts', fontsize=10)
-            axes[1, 1].set_xticks(x_pos + bar_width * (len(FOCAL_COUNTRIES) - 1) / 2)
-            axes[1, 1].set_xticklabels(selected_counterparts)
-            axes[1, 1].tick_params(axis='x', rotation=45)
-            axes[1, 1].legend()
-            axes[1, 1].grid(True, alpha=0.3, axis='y')
-            
-            # Add a text box with color explanation
-            color_explanation = "Color Guide:\n" + "\n".join([f"{country}: {focal_color_dict[country]}" for country in FOCAL_COUNTRIES])
-            fig.text(0.02, 0.02, color_explanation, fontsize=10, bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray"))
-            
-            plt.tight_layout()
-            pdf.savefig(fig, bbox_inches='tight')
-            plt.close()
-            
-            # PAGE 2: Time Series Comparison - Focus on clear focal country comparison over time
-            print("Creating time series comparison page...")
-            fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-            fig.suptitle(f'Time Series Analysis: Focal Country Comparison ({YEAR})', 
-                        fontsize=16, fontweight='bold')
-            
-            # Plot 1: Negativity Score Comparison (aggregated by focal country)
-            for focal_country in FOCAL_COUNTRIES:
-                # Aggregate data for this focal country across all counterparts
-                country_data = daily_scores[daily_scores['FocalCountry'] == focal_country]
-                if not country_data.empty:
-                    daily_agg = country_data.groupby('Date').agg({
-                        'Negativity_Score': 'mean',
-                        'Daily_EventCount': 'sum'
-                    }).reset_index()
-                    
-                    color = focal_color_dict[focal_country]
-                    axes[0, 0].plot(daily_agg['Date'], daily_agg['Negativity_Score'], 
-                                   label=focal_country, color=color, linewidth=3)
-            
-            axes[0, 0].set_title('Average Daily Negativity Score\n(All Counterparts Combined)', fontweight='bold', fontsize=12)
-            axes[0, 0].set_ylabel('Negativity Score', fontsize=10)
-            axes[0, 0].set_xlim([min_date, max_date])
-            axes[0, 0].xaxis.set_major_locator(plt.MaxNLocator(8))
-            axes[0, 0].tick_params(axis='x', rotation=45)
-            axes[0, 0].legend()
-            axes[0, 0].grid(True, alpha=0.3)
-            
-            # Plot 2: Tone-Article Z-Score Comparison (aggregated by focal country)
-            for focal_country in FOCAL_COUNTRIES:
-                country_data = daily_scores[daily_scores['FocalCountry'] == focal_country]
-                if not country_data.empty:
-                    daily_agg = country_data.groupby('Date').agg({
-                        'Tone_Article_ZScore': 'mean'
-                    }).reset_index()
-                    
-                    color = focal_color_dict[focal_country]
-                    axes[0, 1].plot(daily_agg['Date'], daily_agg['Tone_Article_ZScore'], 
-                                   label=focal_country, color=color, linewidth=3)
-            
-            axes[0, 1].set_title('Average Tone-Article Z-Score\n(All Counterparts Combined)', fontweight='bold', fontsize=12)
-            axes[0, 1].set_ylabel('Z-Score', fontsize=10)
-            axes[0, 1].set_xlim([min_date, max_date])
-            axes[0, 1].axhline(y=0, color='black', linestyle='--', alpha=0.7)
-            axes[0, 1].axhline(y=2, color='red', linestyle=':', alpha=0.7)
-            axes[0, 1].axhline(y=-2, color='red', linestyle=':', alpha=0.7)
-            axes[0, 1].xaxis.set_major_locator(plt.MaxNLocator(8))
-            axes[0, 1].tick_params(axis='x', rotation=45)
-            axes[0, 1].legend()
-            axes[0, 1].grid(True, alpha=0.3)
-            
-            # Plot 3: Event Volume Comparison
-            for focal_country in FOCAL_COUNTRIES:
-                country_data = daily_scores[daily_scores['FocalCountry'] == focal_country]
-                if not country_data.empty:
-                    daily_agg = country_data.groupby('Date').agg({
-                        'Daily_EventCount': 'sum'
-                    }).reset_index()
-                    
-                    color = focal_color_dict[focal_country]
-                    axes[1, 0].plot(daily_agg['Date'], daily_agg['Daily_EventCount'], 
-                                   label=focal_country, color=color, linewidth=3)
-            
-            axes[1, 0].set_title('Daily Event Volume\n(All Counterparts Combined)', fontweight='bold', fontsize=12)
-            axes[1, 0].set_ylabel('Number of Events', fontsize=10)
-            axes[1, 0].set_xlim([min_date, max_date])
-            axes[1, 0].xaxis.set_major_locator(plt.MaxNLocator(8))
-            axes[1, 0].tick_params(axis='x', rotation=45)
-            axes[1, 0].legend()
-            axes[1, 0].grid(True, alpha=0.3)
-            
-            # Plot 4: Average Tone Comparison
-            for focal_country in FOCAL_COUNTRIES:
-                country_data = daily_scores[daily_scores['FocalCountry'] == focal_country]
-                if not country_data.empty:
-                    daily_agg = country_data.groupby('Date').agg({
-                        'Daily_AvgTone': 'mean'
-                    }).reset_index()
-                    
-                    color = focal_color_dict[focal_country]
-                    axes[1, 1].plot(daily_agg['Date'], daily_agg['Daily_AvgTone'], 
-                                   label=focal_country, color=color, linewidth=3)
-            
-            axes[1, 1].set_title('Average Daily Tone\n(All Counterparts Combined)', fontweight='bold', fontsize=12)
-            axes[1, 1].set_ylabel('Average Tone', fontsize=10)
-            axes[1, 1].set_xlim([min_date, max_date])
-            axes[1, 1].xaxis.set_major_locator(plt.MaxNLocator(8))
-            axes[1, 1].tick_params(axis='x', rotation=45)
-            axes[1, 1].legend()
-            axes[1, 1].grid(True, alpha=0.3)
-            
-            plt.tight_layout()
-            pdf.savefig(fig, bbox_inches='tight')
-            plt.close()
-            
-            # Additional pages for individual counterparts (existing code)
-            print("Creating individual counterpart pages...")
-            for counterpart in selected_counterparts:
-                if interrupted:
-                    break
-                    
-                fig, axes = plt.subplots(2, 2, figsize=(12, 8))
-                fig.suptitle(f'Detailed Analysis: Relations with {counterpart}', fontsize=14, fontweight='bold')
-                
-                metrics = ['Negativity_Score', 'Tone_Article_ZScore', 'Daily_EventCount', 'Daily_AvgTone']
-                titles = ['Negativity Score', 'Tone-Article Z-Score', 'Daily Event Count', 'Average Tone']
-                
-                for idx, (metric, title) in enumerate(zip(metrics, titles)):
-                    row = idx // 2
-                    col = idx % 2
-                    
-                    for focal_country in FOCAL_COUNTRIES:
-                        rel_data = daily_scores[
-                            (daily_scores['FocalCountry'] == focal_country) & 
-                            (daily_scores['RelationshipPair'] == f"{focal_country}-{counterpart}")
-                        ]
-                        if not rel_data.empty:
-                            color = focal_color_dict[focal_country]
-                            axes[row, col].plot(rel_data['Date'], rel_data[metric], 
-                                              label=focal_country, linewidth=2.5, marker='o',
-                                              color=color, markersize=4, markevery=7)
-                    
-                    axes[row, col].set_title(title, fontweight='bold')
-                    axes[row, col].set_ylabel(title)
-                    axes[row, col].set_xlim([min_date, max_date])
-                    axes[row, col].xaxis.set_major_locator(plt.MaxNLocator(6))
-                    axes[row, col].tick_params(axis='x', rotation=45)
-                    axes[row, col].legend()
-                    axes[row, col].grid(True, alpha=0.3)
-                
-                plt.tight_layout()
-                pdf.savefig(fig, bbox_inches='tight')
-                plt.close()
-
-        print(f"✓ PDF report saved to: {pdf_path}")
-
-    except Exception as e:
-        print(f"✗ Error creating PDF report: {e}")
 
 
 
-        
-    
 
-    # STEP 7: SAVE RESULTS
-    print("\nSTEP 7: Saving results...")
-
-    # Save combined data with random string
-    combined_filename = f"combined_data_{YEAR}_{random_str}.pkl"
-    #combined_df.to_pickle(combined_filename)
-    print(f"✓ Combined data saved to: {combined_filename}")
-
-
-
-    # STEP 8: SUMMARY
-    print("\n" + "="*70)
-    print("PROCESSING COMPLETE - SUMMARY")
-    print("="*70)
-    print(f"✓ Year analyzed: {YEAR}")
-    print(f"✓ Focal countries: {', '.join(FOCAL_COUNTRIES)}")
-    print(f"✓ Counterparts analyzed: {', '.join(selected_counterparts)}")
-    print(f"✓ Total events processed: {len(combined_df):,}")
-    print(f"✓ Daily scores calculated: {len(daily_scores):,}")
-
-    # Show actual date ranges from data
-    if not combined_df.empty:
-        data_start = combined_df['Date'].min().strftime('%Y-%m-%d')
-        data_end = combined_df['Date'].max().strftime('%Y-%m-%d')
-        print(f"✓ Actual data date range: {data_start} to {data_end}")
-
-    print(f"✓ Report generated: {pdf_path}")
-    print(f"✓ Data files saved: {combined_filename}, {scores_filename}")
-    print("--- %s seconds ---" % (time.time() - start_time))
 
 # Run the sequential analysis
 if __name__ == "__main__":
