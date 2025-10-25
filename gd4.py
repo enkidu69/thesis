@@ -214,7 +214,7 @@ def main():
     
     # Fixed parameters
     YEAR = syear  # Using 2024 for actual data
-    FOCAL_COUNTRIES = ['RS','IZ','IS','US', 'FR', 'UK', 'IT','SP']  # Countries we're analyzing
+    FOCAL_COUNTRIES = ['UK']  # Countries we're analyzing
     
     # Event codes to filter for (political/diplomatic events)
     EVENT_CODES = ['012','016','0212','0214','0232','0233','0234','0243','0244','0252','0253','0254','0255','0256','026','027','028','0312','0314','032','0332','0333','0334','0354','0355','0356','036','037','038','039','046','050','051','052','053','054','055','056','057','06','060','061','062','063','064','071','072','073','074','075','0811','0812','0813','0814','082','083','0831','0832','0833','0834','0841','085','086','0861','0862','0863','087','0871','0872','0873','0874','092','093','094','1012','1014','102','1032','1033','1034','1041','1042','1043','1044','1052','1054','1055','1056','106','107','108','111','1121','1122','1123','1124','1125','113','114','115','116','121','1211','1212','122','1221','1222','1223','1224','123','1231','1232','1233','1234','124','1241','1242','1243','1244','1245','1246','125','126','127','128','129','130','131','1311','1312','1313','132','1321','1322','1323','1324','133','134','135','136','137','138','1381','1382','1383','1384','1385','139','140','141','1411','1412','1413','1414','142','1421','1422','1423','1424','143','1431','1432','1433','1434','144','1441','1442','1443','1444','145','1451','1452','1453','1454','150','151','152','153','154','155','16','160','161','162','1621','1622','1623','163','164','165','166','1661','1662','1663','1712','1721','1722','1723','1724','174','175','180','181','182','1821','1822','1823','183','1831','1832','1833','1834','184','185','186','190','191','192','193','194','195','1951','1952','196','200','201','202','203','204','2041','2042']
@@ -227,7 +227,10 @@ def main():
     print("\nSTEP 2: Selecting counterpart countries...")
 
     # Default selection
-    default_counterparts = ['RS','IZ','IS','US', 'FR', 'UK', 'IT','SP']
+    #default_counterparts = ['RS','IZ','IS','US', 'FR', 'UK', 'IT','SP']
+    
+    default_counterparts = ['AF','AL','AG','AQ','AN','AO','AV','AY','AC','AR','AM','AA','AT','AS','AU','AJ','BF','BA','FQ','BG','BB','BS','BO','BE','BH','BN','BD','BT','BL','BK','BC','BV','BR','IO','VI','BX','BU','UV','BM','BY','CB','CM','CA','CV','CJ','CT','CD','CI','CH','KT','IP','CK','CO','CN','CF','CW','CR','CS','IV','HR','CU','CY','EZ','DA','DJ','DO','DR','EC','EG','ES','EK','ER','EN','ET','EU','FK','FO','FM','FJ','FI','FR','FG','FP','FS','GB','GA','GZ','GG','GM','GH','GI','GO','GR','GL','GJ','GP','GQ','GT','GK','GV','PU','GY','HA','HM','HO','HK','HQ','HU','IC','IN','ID','IR','IZ','EI','IS','IT','JM','JN','JA','DQ','JE','JQ','JO','JU','KZ','KE','KQ','KR','KN','KS','KU','KG','LA','LG','LE','LT','LI','LY','LS','LH','LU','MC','MK','MA','MI','MY','MV','ML','MT','IM','RM','MB','MR','MP','MF','MX','MQ','MD','MN','MG','MW','MH','MO','MZ','WA','NR','BQ','NP','NL','NT','NC','NZ','NU','NG','NI','NE','NF','CQ','NO','MU','PK','LQ','PM','PP','PF','PA','PE','RP','PC','PL','PO','RQ','QA','RE','RO','RS','RW','SC','SH','ST','SB','VC','SM','TP','SA','SG','SR','SE','SL','SN','LO','SI','BP','SO','SF','SX','SP','PG','CE','SU','NS','SV','WZ','SW','SZ','SY','TI','TZ','TH','TO','TL','TN','TD','TE','PS','TS','TU','TX','TK','TV','UG','UP','TC','UK','UK','UK','UK','US','UY','UZ','NH','VT','VE','VM','VQ','WQ','WF','WE','WI','WS','YM','CG','ZA','ZI','TW']
+
     print(f"Default counterparts: {', '.join(default_counterparts)}")
 
     # Simple user input
@@ -317,13 +320,7 @@ def main():
             daily_country_data = []
             for focal_country in FOCAL_COUNTRIES:
                 # Filter for events where focal country is involved
-                #print(focal_country)
-                #print(df_daily)
-                #daily = f'daily_scores_{YEAR}_.csv'
-                #Data.to_excel(filename, index=False, engine="xlsxwriter")
-                #df_daily.to_csv(daily, index=False)
-                #print(focal_country)
-                #exit()
+ 
                 focal_filter = df_daily[
                     (df_daily['Actor1Geo_CountryCode'] == focal_country) | 
                     (df_daily['Actor2Geo_CountryCode'] == focal_country)
@@ -336,7 +333,7 @@ def main():
 #######################print(EVENT_CODES) REMOVED TEMPORAROY
                     #df_filtered = df_filtered[df_filtered['EventBaseCode'].isin(EVENT_CODES)]
                     #print(df_filtered)
-                    df_filtered=df_filtered[df_filtered["EventCode"].astype(str).isin(EVENT_CODES)]
+                    #df_filtered=df_filtered[df_filtered["EventCode"].astype(str).isin(EVENT_CODES)]
                     if len(df_filtered) > 0:
                         # Create relationship column
                         def get_relationship_pair(row):
@@ -500,11 +497,21 @@ def main():
     daily_scores['newrel']=np.where(daily_scores['Counterpart']<daily_scores['FocalCountry'],daily_scores['Counterpart']+daily_scores['FocalCountry'],daily_scores['FocalCountry']+daily_scores['Counterpart'] )
 
     print(f"✓ Calculated scores for {len(daily_scores)} daily relationships")
-
-    # STEP 6: CREATE VISUALIZATION REPORT
+    
+        # Save daily scores with random string
     import random
     import string
     random_str = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
+    scores_filename = f'daily_scores_{YEAR}_{random_str}.csv'
+    daily_scores.to_csv(scores_filename, index=False)
+    print(f"✓ Daily scores saved to: {scores_filename}")
+    exit()
+    
+    
+
+    # STEP 6: CREATE VISUALIZATION REPORT
+
+    
     country_str = '_'.join(FOCAL_COUNTRIES)
     pdf_path = os.path.join(f'{country_str}_Analysis_{YEAR}_{random_str}.pdf')
 
@@ -808,10 +815,6 @@ def main():
     #combined_df.to_pickle(combined_filename)
     print(f"✓ Combined data saved to: {combined_filename}")
 
-    # Save daily scores with random string
-    scores_filename = f'daily_scores_{YEAR}_{random_str}.csv'
-    daily_scores.to_csv(scores_filename, index=False)
-    print(f"✓ Daily scores saved to: {scores_filename}")
 
 
     # STEP 8: SUMMARY
