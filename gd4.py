@@ -227,7 +227,7 @@ def main():
     print("\nSTEP 2: Selecting counterpart countries...")
 
     # Default selection
-    default_counterparts = ['RS','IZ','IS','US', 'FR', 'UK', 'IT','SP','IR', 'AG', 'AJ', 'AM','BG', ]
+    default_counterparts = ['RS','IZ','IS','US', 'FR', 'UK', 'IT','SP','IR', 'AG', 'AJ', 'AM','BG', 'CH', 'GZ', 'HK', 'IN', 'ID', 'KN', 'KZ', 'LY','MD','MY', 'NU', 'PK', 'SA', 'SU', 'SY','TU', 'UZ', 'VE', 'WE', 'YM']
     
     #default_counterparts = ['AF','AL','AG','AQ','AN','AO','AV','AY','AC','AR','AM','AA','AT','AS','AU','AJ','BF','BA','FQ','BG','BB','BS','BO','BE','BH','BN','BD','BT','BL','BK','BC','BV','BR','IO','VI','BX','BU','UV','BM','BY','CB','CM','CA','CV','CJ','CT','CD','CI','CH','KT','IP','CK','CO','CN','CF','CW','CR','CS','IV','HR','CU','CY','EZ','DA','DJ','DO','DR','EC','EG','ES','EK','ER','EN','ET','EU','FK','FO','FM','FJ','FI','FR','FG','FP','FS','GB','GA','GZ','GG','GM','GH','GI','GO','GR','GL','GJ','GP','GQ','GT','GK','GV','PU','GY','HA','HM','HO','HK','HQ','HU','IC','IN','ID','IR','IZ','EI','IS','IT','JM','JN','JA','DQ','JE','JQ','JO','JU','KZ','KE','KQ','KR','KN','KS','KU','KG','LA','LG','LE','LT','LI','LY','LS','LH','LU','MC','MK','MA','MI','MY','MV','ML','MT','IM','RM','MB','MR','MP','MF','MX','MQ','MD','MN','MG','MW','MH','MO','MZ','WA','NR','BQ','NP','NL','NT','NC','NZ','NU','NG','NI','NE','NF','CQ','NO','MU','PK','LQ','PM','PP','PF','PA','PE','RP','PC','PL','PO','RQ','QA','RE','RO','RS','RW','SC','SH','ST','SB','VC','SM','TP','SA','SG','SR','SE','SL','SN','LO','SI','BP','SO','SF','SX','SP','PG','CE','SU','NS','SV','WZ','SW','SZ','SY','TI','TZ','TH','TO','TL','TN','TD','TE','PS','TS','TU','TX','TK','TV','UG','UP','TC','UK','UK','UK','UK','US','UY','UZ','NH','VT','VE','VM','VQ','WQ','WF','WE','WI','WS','YM','CG','ZA','ZI','TW']
 
@@ -508,13 +508,13 @@ def main():
     
     daily_scores1=daily_scores[daily_scores['Tone_Article_ZScore']<0]
     scores_filename = f'NEG_{YEAR}_{random_str}.csv'
-    daily_scores1.to_csv(scores_filename, index=False)
+    #daily_scores1.to_csv(scores_filename, index=False)
     
     #group by date, 10 lowsest zscore per day    
     min_10_with_all_columns = daily_scores.loc[daily_scores.groupby('Date')['Tone_Article_ZScore'].nsmallest(10).index.get_level_values(1)]
     
     #print(min_10_with_all_columns)
-    min_filename = f'MIN_{YEAR}_{random_str}.csv'
+    #min_filename = f'MIN_{YEAR}_{random_str}.csv'
     #min_10_with_all_columns.to_csv(min_filename, index=False)
     
     # Read the Excel file
