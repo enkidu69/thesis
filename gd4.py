@@ -135,7 +135,7 @@ def download_gdelt_data_direct():
     start_day=1
     eyear=2022
     end_month=1
-    end_day=2
+    end_day=30
     start_date = datetime(syear, start_month, start_day)
     end_date = datetime(eyear, end_month, end_day)
     current_date = start_date
@@ -220,7 +220,7 @@ def main():
     
     # Fixed parameters
     YEAR = syear  # Using 2024 for actual data
-    FOCAL_COUNTRIES = ['US']  # Countries we're analyzing
+    FOCAL_COUNTRIES = ['UK']  # Countries we're analyzing
     
     EVENT_ROOTCODES= ['10','11','12','13','14','15','16','17','18','19','20']
     # Event codes to filter for (political/diplomatic events)
@@ -339,9 +339,9 @@ def main():
                 if EVENT_CODES and len(df_filtered) > 0:
 #######################print(EVENT_CODES)
                     #print(df_filtered)
-                    #df_filtered=df_filtered[df_filtered["EventCode"].astype(str).isin(EVENT_CODES)]
+                    df_filtered=df_filtered[df_filtered["EventCode"].astype(str).isin(EVENT_CODES)]
                     #rootcode filter
-                    df_filtered=df_filtered[df_filtered["EventRootCode"].astype(str).isin(EVENT_ROOTCODES)]
+                    #df_filtered=df_filtered[df_filtered["EventRootCode"].astype(str).isin(EVENT_ROOTCODES)]
                     
                     if len(df_filtered) > 0:
                         # Create relationship column
@@ -615,7 +615,7 @@ def main():
     #print(f"Merged records with cyber events: {merged_df[merged_df['event_count'].notna()].shape[0]}")
     merged_df.to_excel(mergedname, index=False)
     
-    df = pd.read_excel('GLOB_US.xlsx', sheet_name='Sheet1')
+    df = pd.read_excel('GLOB_UK_part.xlsx', sheet_name='Sheet1')
     
     def verify_strong_correlation(df):
         """Verify the nearly perfect -1 correlation finding"""
