@@ -36,7 +36,7 @@ FIPS_TO_ISO2 = {'AF': 'AFGHANISTAN','AL': 'ALBANIA','AG': 'ALGERIA','AQ': 'AMERI
 # Global variable to track interruption
 interrupted = False
 
-syear=2018
+syear=2020
 year=syear
 #start_month=1 
 #start_day=1
@@ -130,12 +130,12 @@ def download_gdelt_data_direct():
     temp_dir = 'temp_data_direct'
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
-    syear=2023
+    syear=2020
     start_month=1
     start_day=1
-    eyear=2025
-    end_month=9
-    end_day=30
+    eyear=2022
+    end_month=12
+    end_day=31
     start_date = datetime(syear, start_month, start_day)
     end_date = datetime(eyear, end_month, end_day)
     current_date = start_date
@@ -347,7 +347,7 @@ def main():
                 
                 # Filter by event codes
                 if EVENT_CODES and len(df_filtered) > 0:
-#######################print(EVENT_CODES)
+#######################print(EVENT_CODES)####################################################################################EVENT CODE FILTERING#######################################################################################################
                     #print(df_filtered)
                     df_filtered=df_filtered[df_filtered["EventCode"].astype(str).isin(EVENT_CODES)]
                     #rootcode filter
@@ -418,7 +418,7 @@ def main():
 
 
         before_filter = len(combined_df)
-        #ignored counterpart filter
+#######COUNTERPARTFILTER#################################ignored counterpart filter###################################################################################################################################
         #combined_df = combined_df[counterpart_filter].copy()
         
         print(f"✓ Filtered to {len(combined_df):,} events (from {before_filter:,})")
@@ -432,10 +432,16 @@ def main():
         print("✗ No data found after processing!")
         return
 
-    # [Rest of the processing steps 5-8 remain similar to before...]
+    
     # STEP 5: CALCULATE NEGATIVITY SCORES
     print("\nSTEP 5: Calculating negativity scores...")
+    #print the dataframe to excel to check data
+    #combined_df
 
+
+    #combinedname=f'coombinedDF_{YEAR}.xlsx'
+    #combined_df.to_excel(combinedname, index=False)
+    #exit()
     if len(combined_df) == 0:
         print("✗ No data to calculate scores!")
         return
