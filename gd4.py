@@ -36,7 +36,7 @@ FIPS_TO_ISO2 = {'AF': 'AFGHANISTAN','AL': 'ALBANIA','AG': 'ALGERIA','AQ': 'AMERI
 # Global variable to track interruption
 interrupted = False
 
-syear=2025
+syear=2018
 year=syear
 #start_month=1 
 #start_day=1
@@ -130,7 +130,7 @@ def download_gdelt_data_direct():
     temp_dir = 'temp_data_direct'
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
-    syear=2025
+    syear=2023
     start_month=1
     start_day=1
     eyear=2025
@@ -349,7 +349,7 @@ def main():
                 if EVENT_CODES and len(df_filtered) > 0:
 #######################print(EVENT_CODES)
                     #print(df_filtered)
-                    #df_filtered=df_filtered[df_filtered["EventCode"].astype(str).isin(EVENT_CODES)]
+                    df_filtered=df_filtered[df_filtered["EventCode"].astype(str).isin(EVENT_CODES)]
                     #rootcode filter
                     #df_filtered=df_filtered[df_filtered["EventRootCode"].astype(str).isin(EVENT_ROOTCODES)]
                     
