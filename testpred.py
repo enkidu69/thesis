@@ -751,3 +751,241 @@ print("\n" + "="*70)
 print("SUMMARY: Daily_AvgTone has MODERATE predictive power for events")
 print("Best used as an EARLY WARNING SYSTEM with two-tier alerts")
 print("="*70)
+
+def create_alert_table(df):
+    """Apply prediction thresholds to all daily data and create alert table"""
+    
+    print("="*70)
+    print("DAILY ALERT TABLE - Applying Thresholds to All Data")
+    print("="*70)
+    
+    # Clean and prepare data
+    clean_data = df.dropna(subset=['Daily_AvgTone', 'event_count']).copy()
+    clean_data['Date'] = pd.to_datetime(clean_data['Date'])
+    clean_data = clean_data.sort_values('Date')
+    
+    # Aggregate daily data
+    daily_aggregated = clean_data.groupby('Date').agg({
+        'Daily_AvgTone': 'sum',
+        'event_count': 'sum'
+    }).reset_index()
+    
+    daily_aggregated.columns = ['Date', 'Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum']
+    
+    # Create complete dataset
+    all_dates = pd.date_range(start=clean_data['Date'].min(), end=clean_data['Date'].max(), freq='D')
+    daily_global = pd.DataFrame({'Date': all_dates})
+    daily_global = daily_global.merge(daily_aggregated, on='Date', how='left')
+    daily_global[['Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum']] = daily_global[['Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum']].fillna(0)
+    daily_global['Event_Occurred'] = (daily_global['Global_Event_Count_Sum'] > 0).astype(int)
+    
+    # Feature engineering for prediction
+    predictive_data = daily_global.copy().sort_values('Date')
+    
+    # Calculate features
+    predictive_data['Tone_MA_3'] = predictive_data['Global_Daily_AvgTone_Sum'].rolling(3).mean()
+    predictive_data['Tone_MA_7'] = predictive_data['Global_Daily_AvgTone_Sum'].rolling(7).mean()
+    predictive_data['Tone_Std_7'] = predictive_data['Global_Daily_AvgTone_Sum'].rolling(7).std()
+    
+    for lag in [1, 2, 3]:
+        predictive_data[f'Tone_Lag_{lag}'] = predictive_data['Global_Daily_AvgTone_Sum'].shift(lag)
+    
+    predictive_data['Event_Lag_1'] = predictive_data['Event_Occurred'].shift(1)
+    predictive_data['Event_Lag_3'] = predictive_data['Event_Occurred'].shift(3)
+    
+    # Target: events in next 3 days
+    event_next_1 = predictive_data['Event_Occurred'].shift(-1).fillna(0).astype(int)
+    event_next_2 = predictive_data['Event_Occurred'].shift(-2).fillna(0).astype(int)
+    event_next_3 = predictive_data['Event_Occurred'].shift(-3).fillna(0).astype(int)
+    predictive_data['Event_Next_3D'] = ((event_next_1 + event_next_2 + event_next_3) > 0).astype(int)
+    
+    predictive_data_clean = predictive_data.dropna()
+    
+    # Features for prediction
+    feature_cols = ['Global_Daily_AvgTone_Sum', 'Tone_MA_3', 'Tone_MA_7', 'Tone_Std_7',
+                   'Tone_Lag_1', 'Tone_Lag_2', 'Tone_Lag_3', 'Event_Lag_1', 'Event_Lag_3']
+    
+    X = predictive_data_clean[feature_cols]
+    y = predictive_data_clean['Event_Next_3D']
+    
+    # Train the model
+    from sklearn.ensemble import RandomForestClassifier
+    model = RandomForestClassifier(n_estimators=100, class_weight='balanced', random_state=42)
+    model.fit(X, y)
+    
+    # Get prediction probabilities for ALL data
+    prediction_probabilities = model.predict_proba(X)[:, 1]
+    predictive_data_clean['Prediction_Probability'] = prediction_probabilities
+    
+    # Apply thresholds
+    tier1_threshold = 0.3
+    tier2_threshold = 0.5
+    
+    predictive_data_clean['Tier1_Alert'] = (predictive_data_clean['Prediction_Probability'] >= tier1_threshold).astype(int)
+    predictive_data_clean['Tier2_Alert'] = (predictive_data_clean['Prediction_Probability'] >= tier2_threshold).astype(int)
+    
+    # Create the alert table
+    alert_table = predictive_data_clean[[
+        'Date', 'Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum', 
+        'Event_Occurred', 'Event_Next_3D', 'Prediction_Probability',
+        'Tier1_Alert', 'Tier2_Alert'
+    ]].copy()
+    
+    # Add alert descriptions
+    alert_table['Tier1_Alert_Text'] = alert_table['Tier1_Alert'].map({1: 'ALERT', 0: 'No Alert'})
+    alert_table['Tier2_Alert_Text'] = alert_table['Tier2_Alert'].map({1: 'HIGH ALERT', 0: 'No Alert'})
+    
+    # Add performance evaluation
+    alert_table['Correct_Prediction'] = (
+        ((alert_table['Tier1_Alert'] == 1) & (alert_table['Event_Next_3D'] == 1)) |
+        ((alert_table['Tier1_Alert'] == 0) & (alert_table['Event_Next_3D'] == 0))
+    ).astype(int)
+    
+    # Print summary statistics
+    print(f"\nSUMMARY STATISTICS:")
+    print("-" * 40)
+    print(f"Total days analyzed: {len(alert_table)}")
+    print(f"Days with events (next 3D): {alert_table['Event_Next_3D'].sum()} ({alert_table['Event_Next_3D'].mean()*100:.1f}%)")
+    print(f"Tier 1 Alerts triggered: {alert_table['Tier1_Alert'].sum()} ({alert_table['Tier1_Alert'].mean()*100:.1f}%)")
+    print(f"Tier 2 Alerts triggered: {alert_table['Tier2_Alert'].sum()} ({alert_table['Tier2_Alert'].mean()*100:.1f}%)")
+    print(f"Overall accuracy: {alert_table['Correct_Prediction'].mean()*100:.1f}%")
+    
+    # Show recent alerts (last 30 days)
+    recent_alerts = alert_table.tail(30).copy()
+    
+    print(f"\nRECENT ALERTS (Last 30 days):")
+    print("-" * 100)
+    print(f"{'Date':<12} | {'Tone':<8} | {'Prob':<6} | {'Tier1':<8} | {'Tier2':<10} | {'Event Next 3D':<13} | {'Match':<6}")
+    print("-" * 100)
+    
+    for _, row in recent_alerts.iterrows():
+        date_str = row['Date'].strftime('%Y-%m-%d')
+        tone = row['Global_Daily_AvgTone_Sum']
+        prob = row['Prediction_Probability']
+        tier1 = row['Tier1_Alert_Text']
+        tier2 = row['Tier2_Alert_Text']
+        event_next = "EVENT" if row['Event_Next_3D'] else "No Event"
+        match = "✓" if row['Correct_Prediction'] else "✗"
+        
+        print(f"{date_str} | {tone:>7.2f} | {prob:>5.3f} | {tier1:>8} | {tier2:>10} | {event_next:>13} | {match:>6}")
+    
+    # Show highest probability alerts
+    high_prob_alerts = alert_table.nlargest(20, 'Prediction_Probability')[['Date', 'Global_Daily_AvgTone_Sum', 'Prediction_Probability', 'Event_Next_3D']]
+    
+    print(f"\nTOP 20 HIGHEST PROBABILITY ALERTS:")
+    print("-" * 70)
+    print(f"{'Date':<12} | {'Tone':<8} | {'Probability':<12} | {'Event Occurred':<14}")
+    print("-" * 70)
+    
+    for _, row in high_prob_alerts.iterrows():
+        date_str = row['Date'].strftime('%Y-%m-%d')
+        tone = row['Global_Daily_AvgTone_Sum']
+        prob = row['Prediction_Probability']
+        event_occurred = "✓ EVENT" if row['Event_Next_3D'] else "✗ No Event"
+        
+        print(f"{date_str} | {tone:>7.2f} | {prob:>11.3f} | {event_occurred:>14}")
+    
+    # Performance by threshold
+    print(f"\nPERFORMANCE BY THRESHOLD LEVEL:")
+    print("-" * 60)
+    print(f"{'Threshold':<10} | {'Alerts':<8} | {'Precision':<10} | {'Recall':<8} | {'F1':<6}")
+    print("-" * 60)
+    
+    thresholds = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
+    for threshold in thresholds:
+        alerts = (alert_table['Prediction_Probability'] >= threshold).astype(int)
+        true_positives = ((alerts == 1) & (alert_table['Event_Next_3D'] == 1)).sum()
+        false_positives = ((alerts == 1) & (alert_table['Event_Next_3D'] == 0)).sum()
+        false_negatives = ((alerts == 0) & (alert_table['Event_Next_3D'] == 1)).sum()
+        
+        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
+        recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
+        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+        
+        print(f"{threshold:>9.1f} | {alerts.sum():>7} | {precision:>9.3f} | {recall:>7.3f} | {f1:>5.3f}")
+    
+    return alert_table
+
+# Create the comprehensive alert table
+alert_table = create_alert_table(df)
+
+# Additional analysis: Alert patterns over time
+def analyze_alert_patterns(alert_table):
+    """Analyze patterns in the alerts"""
+    
+    print(f"\n" + "="*70)
+    print("ALERT PATTERN ANALYSIS")
+    print("="*70)
+    
+    # Monthly alert patterns
+    alert_table['YearMonth'] = alert_table['Date'].dt.to_period('M')
+    monthly_stats = alert_table.groupby('YearMonth').agg({
+        'Tier1_Alert': 'sum',
+        'Tier2_Alert': 'sum',
+        'Event_Next_3D': 'sum',
+        'Prediction_Probability': 'mean'
+    }).reset_index()
+    
+    monthly_stats.columns = ['YearMonth', 'Tier1_Alerts', 'Tier2_Alerts', 'Actual_Events', 'Avg_Probability']
+    
+    print("MONTHLY ALERT PATTERNS (Last 12 months):")
+    print("-" * 80)
+    print(f"{'Month':<10} | {'Tier1':<6} | {'Tier2':<6} | {'Events':<7} | {'Avg Prob':<9}")
+    print("-" * 80)
+    
+    for _, row in monthly_stats.tail(12).iterrows():
+        month_str = str(row['YearMonth'])
+        print(f"{month_str:>10} | {row['Tier1_Alerts']:>6} | {row['Tier2_Alerts']:>6} | {row['Actual_Events']:>7} | {row['Avg_Probability']:>8.3f}")
+    
+    # Alert effectiveness
+    true_positives_t1 = ((alert_table['Tier1_Alert'] == 1) & (alert_table['Event_Next_3D'] == 1)).sum()
+    false_positives_t1 = ((alert_table['Tier1_Alert'] == 1) & (alert_table['Event_Next_3D'] == 0)).sum()
+    false_negatives_t1 = ((alert_table['Tier1_Alert'] == 0) & (alert_table['Event_Next_3D'] == 1)).sum()
+    
+    true_positives_t2 = ((alert_table['Tier2_Alert'] == 1) & (alert_table['Event_Next_3D'] == 1)).sum()
+    false_positives_t2 = ((alert_table['Tier2_Alert'] == 1) & (alert_table['Event_Next_3D'] == 0)).sum()
+    false_negatives_t2 = ((alert_table['Tier2_Alert'] == 0) & (alert_table['Event_Next_3D'] == 1)).sum()
+    
+    print(f"\nALERT EFFECTIVENESS:")
+    print("-" * 50)
+    print(f"TIER 1 ALERTS (Threshold 0.3):")
+    print(f"  True Positives:  {true_positives_t1:>4} (events correctly predicted)")
+    print(f"  False Positives: {false_positives_t1:>4} (alerts without events)")
+    print(f"  False Negatives: {false_negatives_t1:>4} (events missed)")
+    print(f"  Precision: {true_positives_t1/(true_positives_t1+false_positives_t1):.1%}")
+    print(f"  Recall:    {true_positives_t1/(true_positives_t1+false_negatives_t1):.1%}")
+    
+    print(f"\nTIER 2 ALERTS (Threshold 0.5):")
+    print(f"  True Positives:  {true_positives_t2:>4} (events correctly predicted)")
+    print(f"  False Positives: {false_positives_t2:>4} (alerts without events)")
+    print(f"  False Negatives: {false_negatives_t2:>4} (events missed)")
+    print(f"  Precision: {true_positives_t2/(true_positives_t2+false_positives_t2):.1%}")
+    print(f"  Recall:    {true_positives_t2/(true_positives_t2+false_negatives_t2):.1%}")
+
+# Run pattern analysis
+analyze_alert_patterns(alert_table)
+
+# Option to save the full alert table to CSV
+def save_alert_table(alert_table, filename="daily_alert_table.csv"):
+    """Save the complete alert table to CSV"""
+    # Create a more detailed version for saving
+    detailed_table = alert_table.copy()
+    detailed_table['Date'] = detailed_table['Date'].dt.strftime('%Y-%m-%d')
+    detailed_table['Alert_Level'] = detailed_table.apply(
+        lambda x: 'HIGH' if x['Tier2_Alert'] == 1 else 'MEDIUM' if x['Tier1_Alert'] == 1 else 'LOW', 
+        axis=1
+    )
+    
+    detailed_table.to_csv(filename, index=False)
+    print(f"\nFull alert table saved to: {filename}")
+    print(f"Total records: {len(detailed_table)}")
+    return detailed_table
+
+# Save the table (uncomment if you want to save)
+saved_table = save_alert_table(alert_table)
+
+print(f"\n" + "="*70)
+print("ALERT TABLE COMPLETE")
+print("="*70)
+print("The table shows daily predictions and alerts based on your thresholds.")
+print("Use this for operational monitoring and decision-making.")
