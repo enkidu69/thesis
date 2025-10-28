@@ -78,9 +78,14 @@ def read_and_concatenate_excel_files():
 # Usage
 
 concatenated_df = read_and_concatenate_excel_files()
+
 print(f"Successfully concatenated {len(concatenated_df['source_file'].unique())} files")
 print(f"Final DataFrame shape: {concatenated_df.shape}")
 df=concatenated_df
+#check on data:print(df['event_count'].count())
+#print(len(df))
+
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -101,7 +106,12 @@ def test_tone_predictive_power(df):
     print("="*70)
     
     # Clean data
-    clean_data = df.dropna(subset=['Daily_AvgTone', 'event_count']).copy()
+    #clean_data = df.dropna(subset=['Daily_AvgTone', 'event_count']).copy()
+    clean_data = df
+    #removed dropping NANs print(clean_data)
+    #print(clean_data['event_count'].count())
+    #print(len(clean_data))
+
     clean_data['Date'] = pd.to_datetime(clean_data['Date'])
     clean_data = clean_data.sort_values('Date')
     
@@ -117,7 +127,7 @@ def test_tone_predictive_power(df):
     }).reset_index()
     
     daily_aggregated.columns = ['Date', 'Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum']
-    
+
     # Create complete daily dataset
     daily_global = pd.DataFrame({'Date': all_dates})
     daily_global = daily_global.merge(daily_aggregated, on='Date', how='left')
@@ -141,9 +151,10 @@ def test_tone_predictive_power(df):
     for lag in [1, 2, 3, 5, 7]:  # Test different lead times
         test_data[f'Tone_Lag_{lag}'] = test_data['Global_Daily_AvgTone_Sum'].shift(lag)
         test_data[f'Event_Lead_{lag}'] = test_data['Event_Occurred'].shift(-lag)
-    
-    test_data_clean = test_data.dropna()
-    
+    #print(len(test_data))
+    #exit()
+    #test_data_clean = test_data.dropna()
+    test_data_clean = test_data
     # Statistical test for each lag
     print("Testing if tone PRECEDES events (t-tests):")
     print(f"{'Lag':<10} | {'Tone Before Events':<20} | {'Tone Normal Days':<20} | {'P-value':<10} | {'Significant':<12}")
@@ -989,3 +1000,237 @@ print("ALERT TABLE COMPLETE")
 print("="*70)
 print("The table shows daily predictions and alerts based on your thresholds.")
 print("Use this for operational monitoring and decision-making.")
+
+def produce_next_day_alerts(df):
+    """Produce alerts for the next day based on current tone data"""
+    
+    print("="*70)
+    print("NEXT DAY ALERTS - Daily Prediction System")
+    print("="*70)
+    
+    # Clean and prepare data
+    clean_data = df.dropna(subset=['Daily_AvgTone', 'event_count']).copy()
+    clean_data['Date'] = pd.to_datetime(clean_data['Date'])
+    clean_data = clean_data.sort_values('Date')
+    
+    # Aggregate daily data
+    daily_aggregated = clean_data.groupby('Date').agg({
+        'Daily_AvgTone': 'sum',
+        'event_count': 'sum'
+    }).reset_index()
+    
+    daily_aggregated.columns = ['Date', 'Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum']
+    
+    # Create complete dataset
+    all_dates = pd.date_range(start=clean_data['Date'].min(), end=clean_data['Date'].max(), freq='D')
+    daily_global = pd.DataFrame({'Date': all_dates})
+    daily_global = daily_global.merge(daily_aggregated, on='Date', how='left')
+    daily_global[['Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum']] = daily_global[['Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum']].fillna(0)
+    daily_global['Event_Occurred'] = (daily_global['Global_Event_Count_Sum'] > 0).astype(int)
+    
+    # Feature engineering for next day prediction
+    predictive_data = daily_global.copy().sort_values('Date')
+    
+    # Calculate features needed for prediction
+    predictive_data['Tone_MA_3'] = predictive_data['Global_Daily_AvgTone_Sum'].rolling(3).mean()
+    predictive_data['Tone_MA_7'] = predictive_data['Global_Daily_AvgTone_Sum'].rolling(7).mean()
+    predictive_data['Tone_Std_7'] = predictive_data['Global_Daily_AvgTone_Sum'].rolling(7).std()
+    
+    # Lagged tone features
+    for lag in [1, 2, 3]:
+        predictive_data[f'Tone_Lag_{lag}'] = predictive_data['Global_Daily_AvgTone_Sum'].shift(lag)
+    
+    # Event history
+    predictive_data['Event_Lag_1'] = predictive_data['Event_Occurred'].shift(1)
+    predictive_data['Event_Lag_3'] = predictive_data['Event_Occurred'].shift(3)
+    
+    # Target: event tomorrow
+    predictive_data['Event_Tomorrow'] = predictive_data['Event_Occurred'].shift(-1)
+    
+    # Remove rows with missing data
+    feature_cols = ['Global_Daily_AvgTone_Sum', 'Tone_MA_3', 'Tone_MA_7', 'Tone_Std_7',
+                   'Tone_Lag_1', 'Tone_Lag_2', 'Tone_Lag_3', 'Event_Lag_1', 'Event_Lag_3']
+    
+    predictive_data_clean = predictive_data.dropna(subset=feature_cols + ['Event_Tomorrow'])
+    
+    # Train model on all available data
+    from sklearn.ensemble import RandomForestClassifier
+    
+    X = predictive_data_clean[feature_cols]
+    y = predictive_data_clean['Event_Tomorrow']
+    
+    model = RandomForestClassifier(n_estimators=100, class_weight='balanced', random_state=42)
+    model.fit(X, y)
+    
+    # Get predictions for ALL days
+    all_predictions = model.predict_proba(X)[:, 1]
+    predictive_data_clean['Prediction_Probability'] = all_predictions
+    
+    # Apply thresholds
+    tier1_threshold = 0.3
+    tier2_threshold = 0.5
+    
+    predictive_data_clean['Tier1_Alert'] = (predictive_data_clean['Prediction_Probability'] >= tier1_threshold).astype(int)
+    predictive_data_clean['Tier2_Alert'] = (predictive_data_clean['Prediction_Probability'] >= tier2_threshold).astype(int)
+    
+    # Create the alert table
+    alert_table = predictive_data_clean[[
+        'Date', 'Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum', 
+        'Event_Occurred', 'Event_Tomorrow', 'Prediction_Probability',
+        'Tier1_Alert', 'Tier2_Alert'
+    ]].copy()
+    
+    # Add alert descriptions
+    alert_table['Tier1_Alert_Text'] = alert_table['Tier1_Alert'].map({1: 'ALERT', 0: 'No Alert'})
+    alert_table['Tier2_Alert_Text'] = alert_table['Tier2_Alert'].map({1: 'HIGH ALERT', 0: 'No Alert'})
+    
+    # Add whether prediction was correct
+    alert_table['Correct_Prediction'] = (
+        ((alert_table['Tier1_Alert'] == 1) & (alert_table['Event_Tomorrow'] == 1)) |
+        ((alert_table['Tier1_Alert'] == 0) & (alert_table['Event_Tomorrow'] == 0))
+    ).astype(int)
+    
+    # Print summary
+    print(f"\nALERT SYSTEM SUMMARY:")
+    print("-" * 40)
+    print(f"Total days analyzed: {len(alert_table)}")
+    print(f"Days with events tomorrow: {alert_table['Event_Tomorrow'].sum()} ({alert_table['Event_Tomorrow'].mean()*100:.1f}%)")
+    print(f"Tier 1 Alerts: {alert_table['Tier1_Alert'].sum()} ({alert_table['Tier1_Alert'].mean()*100:.1f}%)")
+    print(f"Tier 2 Alerts: {alert_table['Tier2_Alert'].sum()} ({alert_table['Tier2_Alert'].mean()*100:.1f}%)")
+    print(f"Overall accuracy: {alert_table['Correct_Prediction'].mean()*100:.1f}%")
+    
+    # Show recent alerts (last 30 days)
+    recent_alerts = alert_table.tail(30).copy()
+    
+    print(f"\nRECENT NEXT-DAY ALERTS (Last 30 days):")
+    print("-" * 110)
+    print(f"{'Date':<12} | {'Tone':<8} | {'Prob':<6} | {'Tier1':<8} | {'Tier2':<10} | {'Event Tomorrow':<15} | {'Correct':<8}")
+    print("-" * 110)
+    
+    for _, row in recent_alerts.iterrows():
+        date_str = row['Date'].strftime('%Y-%m-%d')
+        tone = row['Global_Daily_AvgTone_Sum']
+        prob = row['Prediction_Probability']
+        tier1 = row['Tier1_Alert_Text']
+        tier2 = row['Tier2_Alert_Text']
+        event_tomorrow = "EVENT" if row['Event_Tomorrow'] else "No Event"
+        correct = "✓" if row['Correct_Prediction'] else "✗"
+        
+        print(f"{date_str} | {tone:>7.2f} | {prob:>5.3f} | {tier1:>8} | {tier2:>10} | {event_tomorrow:>15} | {correct:>8}")
+    
+    # Show highest probability alerts
+    high_prob_alerts = alert_table.nlargest(20, 'Prediction_Probability')[['Date', 'Global_Daily_AvgTone_Sum', 'Prediction_Probability', 'Event_Tomorrow']]
+    
+    print(f"\nTOP 20 HIGHEST PROBABILITY ALERTS:")
+    print("-" * 70)
+    print(f"{'Date':<12} | {'Tone':<8} | {'Probability':<12} | {'Event Tomorrow':<15}")
+    print("-" * 70)
+    
+    for _, row in high_prob_alerts.iterrows():
+        date_str = row['Date'].strftime('%Y-%m-%d')
+        tone = row['Global_Daily_AvgTone_Sum']
+        prob = row['Prediction_Probability']
+        event_tomorrow = "✓ EVENT" if row['Event_Tomorrow'] else "✗ No Event"
+        
+        print(f"{date_str} | {tone:>7.2f} | {prob:>11.3f} | {event_tomorrow:>15}")
+    
+    # Performance by threshold
+    print(f"\nPERFORMANCE BY THRESHOLD LEVEL:")
+    print("-" * 60)
+    print(f"{'Threshold':<10} | {'Alerts':<8} | {'Precision':<10} | {'Recall':<8} | {'F1':<6}")
+    print("-" * 60)
+    
+    thresholds = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
+    for threshold in thresholds:
+        alerts = (alert_table['Prediction_Probability'] >= threshold).astype(int)
+        true_positives = ((alerts == 1) & (alert_table['Event_Tomorrow'] == 1)).sum()
+        false_positives = ((alerts == 1) & (alert_table['Event_Tomorrow'] == 0)).sum()
+        false_negatives = ((alerts == 0) & (alert_table['Event_Tomorrow'] == 1)).sum()
+        
+        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
+        recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
+        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+        
+        print(f"{threshold:>9.1f} | {alerts.sum():>7} | {precision:>9.3f} | {recall:>7.3f} | {f1:>5.3f}")
+    
+    return alert_table, model, feature_cols
+
+# Run the next-day alert system
+alert_table, trained_model, features_used = produce_next_day_alerts(df)
+
+# Function to get today's prediction
+def get_todays_prediction(current_tone_data, model, feature_names):
+    """
+    Get prediction for today based on current tone data
+    current_tone_data should be a dictionary with today's features
+    """
+    # Create feature vector in the right order
+    feature_vector = [current_tone_data[feature] for feature in feature_names]
+    
+    # Get prediction probability
+    probability = model.predict_proba([feature_vector])[0, 1]
+    
+    # Apply thresholds
+    tier1_alert = probability >= 0.3
+    tier2_alert = probability >= 0.5
+    
+    # Determine alert level and recommendation
+    if tier2_alert:
+        alert_level = "HIGH ALERT"
+        recommendation = "Consider preventive measures - high probability of events tomorrow"
+    elif tier1_alert:
+        alert_level = "MEDIUM ALERT" 
+        recommendation = "Increase monitoring - moderate probability of events tomorrow"
+    else:
+        alert_level = "LOW RISK"
+        recommendation = "Normal monitoring - low probability of events tomorrow"
+    
+    return {
+        'prediction_probability': probability,
+        'alert_level': alert_level,
+        'tier1_alert': tier1_alert,
+        'tier2_alert': tier2_alert,
+        'recommendation': recommendation
+    }
+
+# Example: How to use for today's prediction
+print(f"\n" + "="*70)
+print("HOW TO USE FOR TODAY'S PREDICTION")
+print("="*70)
+
+# Example current data (you would replace with real current data)
+example_current_data = {
+    'Global_Daily_AvgTone_Sum': -0.25,
+    'Tone_MA_3': -0.22,
+    'Tone_MA_7': -0.20,
+    'Tone_Std_7': 0.06,
+    'Tone_Lag_1': -0.18,
+    'Tone_Lag_2': -0.15,
+    'Tone_Lag_3': -0.12,
+    'Event_Lag_1': 0,
+    'Event_Lag_3': 1
+}
+
+today_prediction = get_todays_prediction(example_current_data, trained_model, features_used)
+
+print(f"Example Prediction for Today:")
+print(f"Current Tone: {example_current_data['Global_Daily_AvgTone_Sum']}")
+print(f"Prediction Probability: {today_prediction['prediction_probability']:.3f}")
+print(f"Alert Level: {today_prediction['alert_level']}")
+print(f"Recommendation: {today_prediction['recommendation']}")
+
+# Show what the system would predict for the most recent day
+most_recent = alert_table.iloc[-1]
+print(f"\nMOST RECENT PREDICTION IN DATA:")
+print(f"Date: {most_recent['Date'].strftime('%Y-%m-%d')}")
+print(f"Tone: {most_recent['Global_Daily_AvgTone_Sum']:.2f}")
+print(f"Probability: {most_recent['Prediction_Probability']:.3f}")
+print(f"Tier 1 Alert: {most_recent['Tier1_Alert_Text']}")
+print(f"Tier 2 Alert: {most_recent['Tier2_Alert_Text']}")
+print(f"Actual Event Tomorrow: {'EVENT' if most_recent['Event_Tomorrow'] else 'No Event'}")
+
+print(f"\n" + "="*70)
+print("NEXT-DAY ALERT SYSTEM READY")
+print("=" + "="*70)
+print("Use get_todays_prediction() with current tone data to get tomorrow's forecast")
+print(f"Features needed: {features_used}")
