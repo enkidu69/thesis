@@ -36,7 +36,7 @@ FIPS_TO_ISO2 = {'AF': 'AFGHANISTAN','AL': 'ALBANIA','AG': 'ALGERIA','AQ': 'AMERI
 # Global variable to track interruption
 interrupted = False
 
-syear=2020
+syear=2015
 year=syear
 #start_month=1 
 #start_day=1
@@ -130,10 +130,10 @@ def download_gdelt_data_direct():
     temp_dir = 'temp_data_direct'
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
-    syear=2020
+    syear=2015
     start_month=1
     start_day=1
-    eyear=2022
+    eyear=2017
     end_month=12
     end_day=31
     start_date = datetime(syear, start_month, start_day)
@@ -152,21 +152,23 @@ def download_gdelt_data_direct():
         
         daily_filename = f"daily_{year}{month:02d}{day:02d}.pkl"
         daily_path = os.path.join(temp_dir, daily_filename)
-        daily_path2 = os.path.join("D:", "Data", daily_filename)
         daily_path3 = os.path.join("E:", daily_filename)
-        
-        
+        daily_path2 = os.path.join("D:", "\\", "Data", daily_filename)
+
         # Check if daily file already exists
-        if os.path.exists(daily_path):
-            print(f"✓ Found existing file: {daily_filename}")
-            daily_files.append(daily_path)
-        elif os.path.exists(daily_path2):
-            print(f"✓ Found existing file in D : {daily_filename}")
-            daily_files.append(daily_path2)
-        elif os.path.exists(daily_path3):
-            print(f"✓ Found existing file in E : {daily_filename}")
+        if os.path.exists(daily_path3):
+            print(f"✓ Found existing file in E: {daily_filename}")
             daily_files.append(daily_path3)
-            # Download daily data
+            
+        elif os.path.exists(daily_path):
+            print(f"✓ Found existing file : {daily_filename}")
+            daily_files.append(daily_path)
+            
+        elif os.path.exists(daily_path2):
+            print(f"✓ Found existing file : {daily_filename}")
+            daily_files.append(daily_path2)
+
+
         else:
             df_daily = download_gdelt_day(year, month, day)
             #print(df_daily) OK
@@ -349,9 +351,9 @@ def main():
                 if EVENT_CODES and len(df_filtered) > 0:
 #######################print(EVENT_CODES)####################################################################################EVENT CODE FILTERING#######################################################################################################
                     #print(df_filtered)
-                    df_filtered=df_filtered[df_filtered["EventCode"].astype(str).isin(EVENT_CODES)]
+                    #df_filtered=df_filtered[df_filtered["EventCode"].astype(str).isin(EVENT_CODES)]
                     #rootcode filter
-                    #df_filtered=df_filtered[df_filtered["EventRootCode"].astype(str).isin(EVENT_ROOTCODES)]
+                    df_filtered=df_filtered[df_filtered["EventRootCode"].astype(str).isin(EVENT_ROOTCODES)]
                     
                     if len(df_filtered) > 0:
                         # Create relationship column
