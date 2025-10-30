@@ -77,7 +77,7 @@ def read_and_concatenate_excel_files():
 
 # Usage
 desk = os.getcwd()
-path = desk+ '\\'
+path = desk+ '\\analysis\\'
 files = glob.glob('*cyberevents*.xlsx')
 
 for file in files:
@@ -569,7 +569,7 @@ def test_tone_predictive_power(df,attacks):
     }
 
 # Run the predictive power test
-results = test_tone_predictive_power(df,attacks)
+results = test_tone_predictive_power(df)
 
 
 
