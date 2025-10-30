@@ -36,7 +36,7 @@ FIPS_TO_ISO2 = {'AF': 'AFGHANISTAN','AL': 'ALBANIA','AG': 'ALGERIA','AQ': 'AMERI
 # Global variable to track interruption
 interrupted = False
 
-syear=2023
+syear=2020
 year=syear
 #start_month=1 
 #start_day=1
@@ -130,7 +130,7 @@ def download_gdelt_data_direct():
     temp_dir = 'temp_data_direct'
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
-    syear=2023
+    syear=2020
     start_month=1
     start_day=1
     eyear=2025
@@ -232,7 +232,7 @@ def main():
     
     # Fixed parameters
     YEAR = syear  # Using 2024 for actual data
-    FOCAL_COUNTRIES = ['IT']  # Countries we're analyzing
+    FOCAL_COUNTRIES = ['UK']  # Countries we're analyzing
 #############################################################################################COUNTRY
     EVENT_ROOTCODES= ['10','11','12','13','14','15','16','17','18','19','20']
     # Event codes to filter for (political/diplomatic events)
@@ -440,8 +440,10 @@ def main():
         before_filter = len(combined_df)
 #######COUNTERPARTFILTER#################################ignored counterpart filter###################################################################################################################################
         #combined_df = combined_df[counterpart_filter].copy()
-        #print("NO COUNTERPART FILTER  -ALL COUNTRIES USED")
-        print("COUNTERPART FILTER")
+        #print("COUNTERPART FILTER")
+        
+        print("NO COUNTERPART FILTER  -ALL COUNTRIES USED")
+        
         print(f"✓ Filtered to {len(combined_df):,} events (from {before_filter:,})")
         
         # Final date range check
