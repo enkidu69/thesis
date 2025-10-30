@@ -36,7 +36,7 @@ FIPS_TO_ISO2 = {'AF': 'AFGHANISTAN','AL': 'ALBANIA','AG': 'ALGERIA','AQ': 'AMERI
 # Global variable to track interruption
 interrupted = False
 
-syear=2015
+syear=2023
 year=syear
 #start_month=1 
 #start_day=1
@@ -130,12 +130,12 @@ def download_gdelt_data_direct():
     temp_dir = 'temp_data_direct'
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
-    syear=2015
+    syear=2023
     start_month=1
     start_day=1
-    eyear=2017
-    end_month=12
-    end_day=31
+    eyear=2025
+    end_month=9
+    end_day=30
     start_date = datetime(syear, start_month, start_day)
     end_date = datetime(eyear, end_month, end_day)
     current_date = start_date
@@ -232,8 +232,8 @@ def main():
     
     # Fixed parameters
     YEAR = syear  # Using 2024 for actual data
-    FOCAL_COUNTRIES = ['UK']  # Countries we're analyzing
-    
+    FOCAL_COUNTRIES = ['IT']  # Countries we're analyzing
+#############################################################################################COUNTRY
     EVENT_ROOTCODES= ['10','11','12','13','14','15','16','17','18','19','20']
     # Event codes to filter for (political/diplomatic events)
     EVENT_CODES = ['012','016','0212','0214','0232','0233','0234','0243','0244','0252','0253','0254','0255','0256','026','027','028','0312','0314','032','0332','0333','0334','0354','0355','0356','036','037','038','039','046','050','051','052','053','054','055','056','057','06','060','061','062','063','064','071','072','073','074','075','0811','0812','0813','0814','082','083','0831','0832','0833','0834','0841','085','086','0861','0862','0863','087','0871','0872','0873','0874','092','093','094','1012','1014','102','1032','1033','1034','1041','1042','1043','1044','1052','1054','1055','1056','106','107','108','111','1121','1122','1123','1124','1125','113','114','115','116','121','1211','1212','122','1221','1222','1223','1224','123','1231','1232','1233','1234','124','1241','1242','1243','1244','1245','1246','125','126','127','128','129','130','131','1311','1312','1313','132','1321','1322','1323','1324','133','134','135','136','137','138','1381','1382','1383','1384','1385','139','140','141','1411','1412','1413','1414','142','1421','1422','1423','1424','143','1431','1432','1433','1434','144','1441','1442','1443','1444','145','1451','1452','1453','1454','150','151','152','153','154','155','16','160','161','162','1621','1622','1623','163','164','165','166','1661','1662','1663','1712','1721','1722','1723','1724','174','175','180','181','182','1821','1822','1823','183','1831','1832','1833','1834','184','185','186','190','191','192','193','194','195','1951','1952','196','200','201','202','203','204','2041','2042']
@@ -246,7 +246,8 @@ def main():
     print("\nSTEP 2: Selecting counterpart countries...")
 
     # Default selection
-    default_counterparts = ['RS','IZ','IS','US', 'FR', 'UK', 'IT','SP','IR', 'AG', 'AJ', 'AM','BG', 'CH', 'GZ', 'HK', 'IN', 'ID', 'KN', 'KZ', 'LY','MD','MY', 'NU', 'PK', 'SA', 'SU', 'SY','TU', 'UZ', 'VE', 'WE', 'YM']
+    #default_counterparts = ['RS','IZ','IS','US', 'FR', 'UK', 'IT','SP','IR', 'AG', 'AJ', 'AM','BG', 'CH', 'GZ', 'HK', 'IN', 'ID', 'KN', 'KZ', 'LY','MD','MY', 'NU', 'PK', 'SA', 'SU', 'SY','TU', 'UZ', 'VE', 'WE', 'YM', 'XX']
+    default_counterparts = ['RS']
     
     #default_counterparts = ['AF','AL','AG','AQ','AN','AO','AV','AY','AC','AR','AM','AA','AT','AS','AU','AJ','BF','BA','FQ','BG','BB','BS','BO','BE','BH','BN','BD','BT','BL','BK','BC','BV','BR','IO','VI','BX','BU','UV','BM','BY','CB','CM','CA','CV','CJ','CT','CD','CI','CH','KT','IP','CK','CO','CN','CF','CW','CR','CS','IV','HR','CU','CY','EZ','DA','DJ','DO','DR','EC','EG','ES','EK','ER','EN','ET','EU','FK','FO','FM','FJ','FI','FR','FG','FP','FS','GB','GA','GZ','GG','GM','GH','GI','GO','GR','GL','GJ','GP','GQ','GT','GK','GV','PU','GY','HA','HM','HO','HK','HQ','HU','IC','IN','ID','IR','IZ','EI','IS','IT','JM','JN','JA','DQ','JE','JQ','JO','JU','KZ','KE','KQ','KR','KN','KS','KU','KG','LA','LG','LE','LT','LI','LY','LS','LH','LU','MC','MK','MA','MI','MY','MV','ML','MT','IM','RM','MB','MR','MP','MF','MX','MQ','MD','MN','MG','MW','MH','MO','MZ','WA','NR','BQ','NP','NL','NT','NC','NZ','NU','NG','NI','NE','NF','CQ','NO','MU','PK','LQ','PM','PP','PF','PA','PE','RP','PC','PL','PO','RQ','QA','RE','RO','RS','RW','SC','SH','ST','SB','VC','SM','TP','SA','SG','SR','SE','SL','SN','LO','SI','BP','SO','SF','SX','SP','PG','CE','SU','NS','SV','WZ','SW','SZ','SY','TI','TZ','TH','TO','TL','TN','TD','TE','PS','TS','TU','TX','TK','TV','UG','UP','TC','UK','UK','UK','UK','US','UY','UZ','NH','VT','VE','VM','VQ','WQ','WF','WE','WI','WS','YM','CG','ZA','ZI','TW']
 
@@ -309,7 +310,7 @@ def main():
 
     daily_files = valid_daily_files
     print(f"✓ Valid daily files ready for processing: {len(daily_files)}")
-
+    
     all_country_data = []
     all_counterparts_found = set()
 
@@ -323,7 +324,7 @@ def main():
         try:
             # Load daily file checked OK
             df_daily = pd.read_pickle(daily_file)
-            #########print(df_daily) OK
+            #print(df_daily)
             if len(df_daily) > 0:
                 print("df daily from pickle file: OK")
             #else:
@@ -346,32 +347,49 @@ def main():
                 ]
 
                 df_filtered = focal_filter
-                
+                #print(df_filtered)
                 # Filter by event codes
-                if EVENT_CODES and len(df_filtered) > 0:
+                if len(df_filtered) > 0:
 #######################print(EVENT_CODES)####################################################################################EVENT CODE FILTERING#######################################################################################################
                     #print(df_filtered)
                     #df_filtered=df_filtered[df_filtered["EventCode"].astype(str).isin(EVENT_CODES)]
+                    #print("EVENT CODES USED")
                     #rootcode filter
                     df_filtered=df_filtered[df_filtered["EventRootCode"].astype(str).isin(EVENT_ROOTCODES)]
-                    
+                    print("ROOT CODES USED")
+                    #df_filtered=df_filtered[df_filtered['Actor2Geo_CountryCode'].replace("", focal_country)]
+
+
+                    #print(len(df_filtered))
                     if len(df_filtered) > 0:
                         # Create relationship column
+                        cols = ['Actor2Geo_CountryCode', 'Actor1Geo_CountryCode']
+
+                        df_filtered[cols] = (
+                            df_filtered[cols]
+                            .apply(lambda x: x.str.strip().replace('', np.nan))
+                            .fillna(focal_country)
+                        )
+
                         def get_relationship_pair(row):
                             if row['Actor1Geo_CountryCode'] == focal_country:
                                 counterpart = row['Actor2Geo_CountryCode']
                             else:
                                 counterpart = row['Actor1Geo_CountryCode']
                             
+                            
                             # Collect all counterparts found
                             if pd.notna(counterpart) and counterpart != '':
+                            #if counterpart != '':
                                 all_counterparts_found.add(counterpart)
                             
                             return f"{focal_country}-{counterpart}"
                     
+                    
+                    
                     df_filtered['RelationshipPair'] = df_filtered.apply(get_relationship_pair, axis=1)
                     df_filtered['FocalCountry'] = focal_country
-
+                    
                     
                     # Convert date to proper format
                     df_filtered['Date'] = pd.to_datetime(df_filtered['DATEADDED'].astype(str), format='%Y%m%d', errors='coerce')
@@ -422,7 +440,8 @@ def main():
         before_filter = len(combined_df)
 #######COUNTERPARTFILTER#################################ignored counterpart filter###################################################################################################################################
         #combined_df = combined_df[counterpart_filter].copy()
-        
+        #print("NO COUNTERPART FILTER  -ALL COUNTRIES USED")
+        print("COUNTERPART FILTER")
         print(f"✓ Filtered to {len(combined_df):,} events (from {before_filter:,})")
         
         # Final date range check
@@ -605,36 +624,104 @@ def main():
             'Czechia': 'CZ',
             'Undetermined': 'XX',
             'Moldova (the Republic of)': 'MD',
-            'China': 'CH'
+            'China': 'CH',
+            'Turkey': 'TU',
+            'Taiwan (Province of China)': 'TW',
+            'Holy See': 'VT',
+            'Korea (the Democratic People\'s Republic of)': 'KN',
+            'Bolivia (Plurinational State of)': 'BL',
+            'European Union': 'EU',
+            'Sint Maarten':'NL',
+            'Republic of North Macedonia': 'MK',
+            'Lebanon': 'LE',
+            'Kosovo': 'KS',
+            'Macau': 'CH',
+            'Saint Thomas': 'US',
+            'Vietnam': 'VM',
+            'Kazakstan': 'KZ'
+            
+            
+            
+            
+            
 
         }
+       
+        
         
         return manual_map.get(country_name, None)
-
+    attacks=pd.DataFrame()
     aggregated_df['country_fips'] = aggregated_df['country'].apply(country_to_fips)
     aggregated_df['actor_country_fips'] = aggregated_df['actor_country'].apply(country_to_fips)
-    #consider any undetermined as UK
-    aggregated_df['actor_country_fips'].replace("XX",focal_country)
-    aggregated_df.loc[aggregated_df["actor_country_fips"] == "XX", "actor_country_fips"] = focal_country
     aggregated_df.loc[aggregated_df["actor_country_fips"] == "CN", "actor_country_fips"] = "CH"
+    aggregated_df.loc[aggregated_df["actor_country_fips"] == "RU", "actor_country_fips"] = "RS"
+    aggregated_df.loc[aggregated_df["actor_country_fips"] == "NG", "actor_country_fips"] = "NI"
+    #filter focal countries
+    attacksfilter1=False
+    attacksfilter2=False
+    xx=False
+    attacks=pd.DataFrame()
+    #filter by focal country
+    for focal_country in FOCAL_COUNTRIES:
+        attacksfilter1 |= (aggregated_df['country_fips'] == focal_country)
+        aggregated_df1 = aggregated_df[attacksfilter1].copy()
+        #replace XX with same country to track all of them
+        aggregated_df1.loc[aggregated_df1["actor_country_fips"] == "XX", "actor_country_fips"] = focal_country
+
+        attacks=pd.concat([aggregated_df1,attacks], axis=0, ignore_index=True)
+    
+    
+    for counterpart in selected_counterparts:
+        attacksfilter2 |= (aggregated_df['actor_country_fips'] == counterpart)
+    #filter counterparts to remove in case of all countries!!###########################################################
+    
+    #attacks = aggregated_df[attacksfilter2].copy()
+
+    
+    #consider any undetermined as UK
+    #aggregated_df['actor_country_fips'].replace("XX",focal_country)
+    #aggregated_df.loc[aggregated_df["actor_country_fips"] == "XX", "actor_country_fips"] = focal_country
+    
     #filt=aggregated_df[aggregated_df["actor_country"]=='Russia']
     #print(filt)
     # Merge on date and country
     daily_scores['Date'] = pd.to_datetime(daily_scores['Date'], format='%d-%m-%Y').dt.date
+    
+    
+    
+    
     merged_df = pd.merge(
         daily_scores,
-        aggregated_df,
-        left_on=['Date', 'FocalCountry', 'Counterpart'],
-        right_on=['event_date', 'country_fips', 'actor_country_fips'],
+        attacks,
+        left_on=['Date', 'FocalCountry'],
+        right_on=['event_date', 'country_fips'],
         how='left'  # Use 'left' to keep all daily_scores records, 'inner' for only matches
     )
+    
 
-    print(f"Merged dataset shape: {merged_df.shape}")
+    #clean attack data
+    
+    daily_attacks=merged_df[['event_date', 'motive', 'event_type', 'country', 'actor_country', 'description', 'event_count', 'country_fips','actor_country_fips']]  
+    merged_df = merged_df.drop(columns=['event_date', 'motive', 'event_type', 'country', 'actor_country', 'description', 'event_count', 'country_fips','actor_country_fips'])
+    daily_attacks=daily_attacks.drop_duplicates()
+
+    merged = pd.merge(
+        merged_df,
+        daily_attacks,
+        left_on=['Date', 'FocalCountry','Counterpart'],
+        right_on=['event_date', 'country_fips','actor_country_fips'],
+        how='left'  # Use 'left' to keep all daily_scores records, 'inner' for only matches
+    )
+    
+    
+    
+    print(f"Merged dataset shape: {merged.shape}")
     print(f"Daily scores records: {len(daily_scores)}")
     mergedname=f'aggregated_cyber_events_{YEAR}_{random_str}.xlsx'
     #print(f"Merged records with cyber events: {merged_df[merged_df['event_count'].notna()].shape[0]}")
-    merged_df.to_excel(mergedname, index=False)
-    
+    merged.to_excel(mergedname, index=False)
+    #dailyscores OK
+    #attacks.to_excel('attacks.xlsx', index=False)
    # df = pd.read_excel('GLOB_UK.xlsx', sheet_name='Sheet1')
 
 
