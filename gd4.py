@@ -131,7 +131,7 @@ def download_gdelt_data_direct():
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
     syear=2023
-    start_month=7
+    start_month=1
     start_day=1
     eyear=2025
     end_month=9

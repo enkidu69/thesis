@@ -60,8 +60,8 @@ def read_and_concatenate_excel_files():
         raise FileNotFoundError(f"Folder '{folder_path}' does not exist")
     
     # Get all Excel files
-    excel_files = glob.glob(os.path.join(folder_path, "*.xlsx")) + \
-                  glob.glob(os.path.join(folder_path, "*.xls"))
+    excel_files = glob.glob(os.path.join(folder_path, "aggregated*.xlsx")) + \
+                  glob.glob(os.path.join(folder_path, "aggregated*.xls"))
     
     if not excel_files:
         raise FileNotFoundError(f"No Excel files found in '{folder_path}'")
@@ -76,14 +76,22 @@ def read_and_concatenate_excel_files():
     return pd.concat(dataframes, ignore_index=True)
 
 # Usage
+desk = os.getcwd()
+path = desk+ '\\'
+files = glob.glob('*cyberevents*.xlsx')
 
-concatenated_df = read_and_concatenate_excel_files()
+for file in files:
+    attacks = pd.read_excel(path+str(file))
+    #print(path+str(file))
+
+concatenated_df=read_and_concatenate_excel_files()
 
 print(f"Successfully concatenated {len(concatenated_df['source_file'].unique())} files")
 print(f"Final DataFrame shape: {concatenated_df.shape}")
 df=concatenated_df
 #check on data:print(df['event_count'].count())
 #print(len(df))
+
 
 
 import pandas as pd
@@ -98,7 +106,7 @@ from sklearn.model_selection import TimeSeriesSplit
 import warnings
 warnings.filterwarnings('ignore')
 
-def test_tone_predictive_power(df):
+def test_tone_predictive_power(df,attacks):
     """Test if Daily_AvgTone can PREDICT event occurrence"""
     
     print("="*70)
@@ -115,12 +123,36 @@ def test_tone_predictive_power(df):
     end_date = clean_data['Date'].max()
     all_dates = pd.date_range(start=start_date, end=end_date, freq='D')
     
-    # Aggregate daily data
-    daily_aggregated = clean_data.groupby('Date').agg({
-        'Daily_AvgTone': 'sum',
+    #split tables to aggregate data
+    daily_attacks=attacks.drop_duplicates()
+    
+    daily_attacks['Date']=daily_attacks['event_date']
+    
+    attacks_aggregated = daily_attacks.groupby('Date').agg({
         'event_count': 'sum'
     }).reset_index()
     
+    
+    
+    merged_df=clean_data.drop_duplicates()
+    
+    
+    # Aggregate daily data
+    merged_aggregated = merged_df.groupby('Date').agg({
+        'Daily_AvgTone': 'sum'
+
+    }).reset_index()
+    
+    daily_aggregated=pd.merge(merged_aggregated, attacks_aggregated, on='Date')
+    #daily_aggregated = merged_aggregated.merge(attacks_aggregated,how='cross')
+    
+    
+    
+    #print(daily_aggregated)
+    
+    #daily_aggregated.to_excel("daily.xlsx", index=False)
+
+    #exit()
     daily_aggregated.columns = ['Date', 'Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum']
 
     # Create complete daily dataset
@@ -537,7 +569,7 @@ def test_tone_predictive_power(df):
     }
 
 # Run the predictive power test
-results = test_tone_predictive_power(df)
+results = test_tone_predictive_power(df,attacks)
 
 # Create visualization of the test results
 def create_predictive_power_visualization(results):
@@ -913,33 +945,63 @@ print("SUMMARY: Daily_AvgTone has MODERATE predictive power for events")
 print("Best used as an EARLY WARNING SYSTEM with two-tier alerts")
 print("="*70)
 
-def create_alert_table(df):
+def create_alert_table(df, attacks):
     """Apply prediction thresholds to all daily data and create alert table"""
     
     print("="*70)
     print("DAILY ALERT TABLE - Applying Thresholds to All Data")
     print("="*70)
     
-    # Clean and prepare data
-    clean_data = df.dropna(subset=['Daily_AvgTone', 'event_count']).copy()
+    # Clean data
+    clean_data = df
     clean_data['Date'] = pd.to_datetime(clean_data['Date'])
     clean_data = clean_data.sort_values('Date')
     
-    # Aggregate daily data
-    daily_aggregated = clean_data.groupby('Date').agg({
-        'Daily_AvgTone': 'sum',
+    # Create complete date range
+    start_date = clean_data['Date'].min()
+    end_date = clean_data['Date'].max()
+    all_dates = pd.date_range(start=start_date, end=end_date, freq='D')
+    
+    #split tables to aggregate data
+    daily_attacks=attacks.drop_duplicates()
+    
+    daily_attacks['Date']=daily_attacks['event_date']
+    
+    attacks_aggregated = daily_attacks.groupby('Date').agg({
         'event_count': 'sum'
     }).reset_index()
     
-    daily_aggregated.columns = ['Date', 'Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum']
     
-    # Create complete dataset
-    all_dates = pd.date_range(start=clean_data['Date'].min(), end=clean_data['Date'].max(), freq='D')
+    
+    merged_df=clean_data.drop_duplicates()
+    
+    
+    # Aggregate daily data
+    merged_aggregated = merged_df.groupby('Date').agg({
+        'Daily_AvgTone': 'sum'
+
+    }).reset_index()
+    
+    daily_aggregated=pd.merge(merged_aggregated, attacks_aggregated, on='Date')
+    #daily_aggregated = merged_aggregated.merge(attacks_aggregated,how='cross')
+    
+    
+    
+    #print(daily_aggregated)
+    
+    #daily_aggregated.to_excel("daily.xlsx", index=False)
+
+    #exit()
+    daily_aggregated.columns = ['Date', 'Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum']
+
+    # Create complete daily dataset
     daily_global = pd.DataFrame({'Date': all_dates})
     daily_global = daily_global.merge(daily_aggregated, on='Date', how='left')
     daily_global[['Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum']] = daily_global[['Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum']].fillna(0)
-    daily_global['Event_Occurred'] = (daily_global['Global_Event_Count_Sum'] > 0).astype(int)
     
+    # Create binary event indicator
+    daily_global['Event_Occurred'] = (daily_global['Global_Event_Count_Sum'] > 0).astype(int)
+
     # Feature engineering for prediction
     predictive_data = daily_global.copy().sort_values('Date')
     
@@ -1145,7 +1207,7 @@ def create_alert_table(df):
     return alert_table
 
 # Create the comprehensive alert table
-alert_table = create_alert_table(df)
+alert_table = create_alert_table(df, attacks)
 
 
 def analyze_alert_patterns(alert_table):
