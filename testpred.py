@@ -1,3 +1,4 @@
+# (Full file content with edits applied: models now use only the 28-day moving average and other MAs removed)
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -90,1370 +91,581 @@ concatenated_df=read_and_concatenate_excel_files()
 print(f"Successfully concatenated {len(concatenated_df['source_file'].unique())} files")
 print(f"Final DataFrame shape: {concatenated_df.shape}")
 df=concatenated_df
-#check on data:print(df['event_count'].count())
-#print(len(df))
+"""
+Standalone script to train alert models (using 28-day moving average) and produce
+D+1, D+3, D+7 alerts + verification and metrics. Flattened runtime version (no user functions).
+This file:
+ - trains models (LogisticRegression, RandomForest, optionally XGBoost)
+ - applies models to post-train dates (or all dates if configured)
+ - computes alerts and verification (TP/FP/FN/TN/TN) and persists outputs
+ - computes alert efficiency and business metrics only on test data (post-train)
+ - marks for each test row whether the event (1D/3D/7D) was anticipated by at least one Tier1 alert
+   according to a conservative lookback definition.
+How to use:
+ - Edit the CONFIGURATION section to point to your input files or to set DataFrame variables.
+ - Run: python testpred.py
+ - Outputs (models, CSVs, pickles, metrics) are written to OUT_DIR (default 'outputs').
+Notes:
+ - Uses sklearn.clone to ensure each trained model is an independent estimator.
+ - Aggregates Daily_AvgTone per day with mean (not sum).
+ - Does NOT fill tone NaNs prior to rolling MA to preserve variance.
+ - Anticipation logic: for 1D, checks the same prediction row; for 3D/7D, checks whether any Tier1 alert
+   of the corresponding horizon occurred in the lookback window prior to the earliest possible event day (conservative).
+"""
 
+import os
+import pickle
+from datetime import datetime
 
-
-import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-from scipy import stats
-from sklearn.linear_model import LogisticRegression
+import pandas as pd
+from sklearn.base import clone
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, precision_recall_curve
-from sklearn.model_selection import TimeSeriesSplit
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import classification_report, precision_recall_curve, roc_auc_score
+from sklearn.preprocessing import StandardScaler
+
 import warnings
-warnings.filterwarnings('ignore')
 
-def test_tone_predictive_power(df,attacks):
-    """Test if Daily_AvgTone can PREDICT event occurrence"""
-    
-    print("="*70)
-    print("PREDICTIVE POWER TEST: Can Daily_AvgTone Predict Event Occurrence?")
-    print("="*70)
-    
-    # Clean data
-    clean_data = df
-    clean_data['Date'] = pd.to_datetime(clean_data['Date'])
-    clean_data = clean_data.sort_values('Date')
-    
-    # Create complete date range
-    start_date = clean_data['Date'].min()
-    end_date = clean_data['Date'].max()
-    all_dates = pd.date_range(start=start_date, end=end_date, freq='D')
-    
-    #split tables to aggregate data
-    daily_attacks=attacks.drop_duplicates()
-    
-    daily_attacks['Date']=daily_attacks['event_date']
-    
-    attacks_aggregated = daily_attacks.groupby('Date').agg({
-        'event_count': 'sum'
-    }).reset_index()
-    
-    
-    
-    merged_df=clean_data.drop_duplicates()
-    
-    
-    # Aggregate daily data
-    merged_aggregated = merged_df.groupby('Date').agg({
-        'Daily_AvgTone': 'sum'
+warnings.filterwarnings("ignore")
 
-    }).reset_index()
-    
-    daily_aggregated=pd.merge(merged_aggregated, attacks_aggregated, on='Date')
-    #daily_aggregated = merged_aggregated.merge(attacks_aggregated,how='cross')
-    
-    
-    
-    #print(daily_aggregated)
-    
-    #daily_aggregated.to_excel("daily.xlsx", index=False)
+# optional xgboost
+try:
+    import xgboost as xgb
 
-    #exit()
-    daily_aggregated.columns = ['Date', 'Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum']
+    XGBOOST_AVAILABLE = True
+except Exception:
+    XGBOOST_AVAILABLE = False
 
-    # Create complete daily dataset
-    daily_global = pd.DataFrame({'Date': all_dates})
-    daily_global = daily_global.merge(daily_aggregated, on='Date', how='left')
-    daily_global[['Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum']] = daily_global[['Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum']].fillna(0)
-    
-    # Create binary event indicator
-    daily_global['Event_Occurred'] = (daily_global['Global_Event_Count_Sum'] > 0).astype(int)
-    
-    print(f"Analysis period: {start_date} to {end_date}")
-    print(f"Total days: {len(daily_global)}")
-    print(f"Days with events: {daily_global['Event_Occurred'].sum()} ({daily_global['Event_Occurred'].mean()*100:.1f}%)")
-    
-    # 1. TEST 1: Compare tone BEFORE events vs normal days
-    print(f"\n1. TONE LEADING INDICATOR TEST")
-    print("-" * 50)
-    
-    # Create lagged features to test if past tone predicts future events
-    test_data = daily_global.copy().sort_values('Date')
-    
-    # Create multiple lagged tone features
-    for lag in [1, 2, 3, 5, 7]:  # Test different lead times
-        test_data[f'Tone_Lag_{lag}'] = test_data['Global_Daily_AvgTone_Sum'].shift(lag)
-        test_data[f'Event_Lead_{lag}'] = test_data['Event_Occurred'].shift(-lag)
-    
-    test_data_clean = test_data
-    # Statistical test for each lag
-    print("Testing if tone PRECEDES events (t-tests):")
-    print(f"{'Lag':<10} | {'Tone Before Events':<20} | {'Tone Normal Days':<20} | {'P-value':<10} | {'Significant':<12}")
-    print("-" * 90)
-    
-    for lag in [1, 2, 3, 5, 7]:
-        tone_before_events = test_data_clean[test_data_clean[f'Event_Lead_{lag}'] == 1][f'Tone_Lag_{lag}']
-        tone_normal_days = test_data_clean[test_data_clean[f'Event_Lead_{lag}'] == 0][f'Tone_Lag_{lag}']
-        
-        if len(tone_before_events) > 1 and len(tone_normal_days) > 1:
-            # Check if we have valid data for t-test
-            if tone_before_events.notna().all() and tone_normal_days.notna().all():
-                try:
-                    t_stat, p_value = stats.ttest_ind(tone_before_events, tone_normal_days, equal_var=False)
-                    significant = "YES" if p_value < 0.05 else "NO"
-                    
-                    print(f"{lag:>2} days   | {tone_before_events.mean():>18.2f} | {tone_normal_days.mean():>18.2f} | {p_value:>9.4f} | {significant:>12}")
-                except:
-                    print(f"{lag:>2} days   | {tone_before_events.mean():>18.2f} | {tone_normal_days.mean():>18.2f} | {'NaN':>9} | {'ERROR':>12}")
-            else:
-                print(f"{lag:>2} days   | {tone_before_events.mean():>18.2f} | {tone_normal_days.mean():>18.2f} | {'NaN':>9} | {'INVALID':>12}")
-    
-    # 2. TEST 2: Predictive Modeling with Time-Series Cross-Validation
-    print(f"\n2. PREDICTIVE MODELING TEST")
-    print("-" * 50)
-    
-    # Prepare features for prediction
-    predictive_data = daily_global.copy().sort_values('Date')
-    
-    # Feature engineering focused on prediction
-    predictive_data['Tone_MA_3'] = predictive_data['Global_Daily_AvgTone_Sum'].rolling(3).mean()
-    predictive_data['Tone_MA_7'] = predictive_data['Global_Daily_AvgTone_Sum'].rolling(7).mean()
-    predictive_data['Tone_Std_7'] = predictive_data['Global_Daily_AvgTone_Sum'].rolling(7).std()
-    
-    # Lagged tone features
-    for lag in [1, 2, 3, 7]:
-        predictive_data[f'Tone_Lag_{lag}'] = predictive_data['Global_Daily_AvgTone_Sum'].shift(lag)
-    
-    # Event history
-    predictive_data['Event_Lag_1'] = predictive_data['Event_Occurred'].shift(1)
-    predictive_data['Event_Lag_3'] = predictive_data['Event_Occurred'].shift(3)
-    predictive_data['Event_Lag_7'] = predictive_data['Event_Occurred'].shift(7)
-    
-    # Target: Will an event occur in next X days?
-    predictive_data['Event_Next_1D'] = predictive_data['Event_Occurred'].shift(-1).fillna(0).astype(int)
-    
-    # For 3-day and 7-day prediction
-    event_next_1 = predictive_data['Event_Occurred'].shift(-1).fillna(0).astype(int)
-    event_next_2 = predictive_data['Event_Occurred'].shift(-2).fillna(0).astype(int)
-    event_next_3 = predictive_data['Event_Occurred'].shift(-3).fillna(0).astype(int)
-    event_next_4 = predictive_data['Event_Occurred'].shift(-4).fillna(0).astype(int)
-    event_next_5 = predictive_data['Event_Occurred'].shift(-5).fillna(0).astype(int)
-    event_next_6 = predictive_data['Event_Occurred'].shift(-6).fillna(0).astype(int)
-    event_next_7 = predictive_data['Event_Occurred'].shift(-7).fillna(0).astype(int)
-    
-    predictive_data['Event_Next_3D'] = ((event_next_1 + event_next_2 + event_next_3) > 0).astype(int)
-    predictive_data['Event_Next_7D'] = ((event_next_1 + event_next_2 + event_next_3 + event_next_4 + event_next_5 + event_next_6 + event_next_7) > 0).astype(int)
+# -------------------------
+# CONFIGURATION (edit here)
+# -------------------------
+# Provide either file paths OR define DataFrames `df` and `attacks` in this script before running.
 
-    predictive_data_clean = predictive_data.dropna()
-    
-    # Features for prediction
-    feature_cols = ['Global_Daily_AvgTone_Sum', 'Tone_MA_3', 'Tone_MA_7', 'Tone_Std_7',
-                   'Tone_Lag_1', 'Tone_Lag_2', 'Tone_Lag_3', 'Event_Lag_1', 'Event_Lag_3']
-    
-    results_summary = {}
-    
-    for target_col, horizon in [('Event_Next_1D', '1-day'), ('Event_Next_3D', '3-day'), ('Event_Next_7D', '7-day')]:
-        print(f"\n--- Predicting events in next {horizon} ---")
-        
-        X = predictive_data_clean[feature_cols]
-        y = predictive_data_clean[target_col]
-        
-        print(f"Event rate in target: {y.mean():.3f} ({y.sum()}/{len(y)} events)")
-        
-        # Skip cross-validation modeling if event rate is too high (no predictive challenge)
-        if y.mean() > 0.9:
-            print(f"SKIPPED CV: Event rate too high ({y.mean():.3f}) - no meaningful prediction challenge")
-            # But we'll still include it in baseline and practical significance tests
+TONE_CSV = None  # e.g. "data/aggregated_tone.csv"
+ATTACKS_CSV = None  # e.g. "data/cyberevents.csv" or .xlsx
+
+TRAIN_START = "2018-01-01"
+TRAIN_END = "2022-12-31"
+
+OUT_DIR = "analysis\\outputs"
+MODEL_ALGO_PREFERENCE = "Logistic Regression" if XGBOOST_AVAILABLE else "Random Forest"  # prefer XGBoost if available
+APPLY_TO = "test"  # 'test' or 'all' (but metrics summaries will be computed only on test)
+TIER_THRESHOLD = 0.5  # single threshold for Tier1/Tier2 (simplified)
+
+# Business/cost defaults (editable)
+COST_PER_MISSED_EVENT = 100000
+COST_PER_FALSE_ALERT = 200
+BENEFIT_OF_CATCHING_EVENT = 50000
+COST_OF_RESPONSE = 2000
+SYSTEM_MAINTENANCE_COST = 10000
+
+# -------------------------
+# HELPERS
+# -------------------------
+def ensure_dir(path):
+    if path and not os.path.exists(path):
+        os.makedirs(path, exist_ok=True)
+
+
+def _save_pickle(obj, path):
+    ensure_dir(os.path.dirname(path))
+    with open(path, "wb") as f:
+        pickle.dump(obj, f)
+
+
+def _save_csv(df, path):
+    ensure_dir(os.path.dirname(path))
+    df.to_csv(path, index=False)
+
+
+# -------------------------
+# LOAD DATA
+# -------------------------
+if TONE_CSV is not None and ATTACKS_CSV is not None:
+    # try reading tone
+    try:
+        df = pd.read_csv(TONE_CSV, parse_dates=["Date"])
+    except Exception:
+        df = pd.read_excel(TONE_CSV)
+        if "Date" in df.columns:
+            df["Date"] = pd.to_datetime(df["Date"])
+    # try reading attacks
+    try:
+        attacks = pd.read_csv(ATTACKS_CSV, parse_dates=["event_date"])
+    except Exception:
+        attacks = pd.read_excel(ATTACKS_CSV)
+        if "event_date" in attacks.columns:
+            attacks["event_date"] = pd.to_datetime(attacks["event_date"])
+
+# Validate data presence
+if "df" not in globals() or "attacks" not in globals():
+    raise RuntimeError(
+        "Input data not found. Set TONE_CSV and ATTACKS_CSV, or define DataFrames `df` and `attacks` in the script."
+    )
+
+# -------------------------
+# PREPARE DAILY SERIES
+# -------------------------
+df = df.copy()
+if "Date" not in df.columns:
+    raise RuntimeError("Tone DataFrame must contain a 'Date' column")
+df["Date"] = pd.to_datetime(df["Date"])
+df = df.sort_values("Date").reset_index(drop=True)
+
+attacks = attacks.copy()
+if "event_date" not in attacks.columns:
+    raise RuntimeError("Attacks DataFrame must contain an 'event_date' column")
+attacks["event_date"] = pd.to_datetime(attacks["event_date"])
+attacks = attacks.sort_values("event_date").reset_index(drop=True)
+
+# Aggregate
+tone_daily = df.groupby("Date", as_index=False).agg({"Daily_AvgTone": "mean"})
+attacks_daily = attacks.groupby("event_date", as_index=False).agg({"event_count": "sum"}).rename(
+    columns={"event_date": "Date"}
+)
+
+# Continuous date index
+start_date = min(tone_daily["Date"].min(), attacks_daily["Date"].min())
+end_date = max(tone_daily["Date"].max(), attacks_daily["Date"].max())
+all_dates = pd.date_range(start=start_date, end=end_date, freq="D")
+daily = pd.DataFrame({"Date": all_dates})
+
+# Merge; fill event counts with 0; keep tone NaNs (do not fill before rolling)
+daily = daily.merge(tone_daily.rename(columns={"Daily_AvgTone": "Global_Daily_AvgTone_Sum"}), on="Date", how="left")
+daily = daily.merge(attacks_daily.rename(columns={"event_count": "Global_Event_Count_Sum"}), on="Date", how="left")
+daily["Global_Event_Count_Sum"] = daily["Global_Event_Count_Sum"].fillna(0)
+daily["Event_Occurred"] = (daily["Global_Event_Count_Sum"] > 0).astype(int)
+
+# -------------------------
+# FEATURE ENGINEERING
+# -------------------------
+daily = daily.sort_values("Date").reset_index(drop=True)
+daily["Tone_MA_28"] = daily["Global_Daily_AvgTone_Sum"].rolling(28, min_periods=1).mean()
+daily["Tone_Std_7"] = daily["Global_Daily_AvgTone_Sum"].rolling(7, min_periods=1).std().fillna(0)
+
+for lag in [1, 2, 3, 7]:
+    daily[f"Tone_Lag_{lag}"] = daily["Global_Daily_AvgTone_Sum"].shift(lag)
+daily["Event_Lag_1"] = daily["Event_Occurred"].shift(1)
+daily["Event_Lag_3"] = daily["Event_Occurred"].shift(3)
+daily["Event_Lag_7"] = daily["Event_Occurred"].shift(7)
+
+daily["Event_Next_1D"] = daily["Event_Occurred"].shift(-1).fillna(0).astype(int)
+e1 = daily["Event_Occurred"].shift(-1).fillna(0).astype(int)
+e2 = daily["Event_Occurred"].shift(-2).fillna(0).astype(int)
+e3 = daily["Event_Occurred"].shift(-3).fillna(0).astype(int)
+e4 = daily["Event_Occurred"].shift(-4).fillna(0).astype(int)
+e5 = daily["Event_Occurred"].shift(-5).fillna(0).astype(int)
+e6 = daily["Event_Occurred"].shift(-6).fillna(0).astype(int)
+e7 = daily["Event_Occurred"].shift(-7).fillna(0).astype(int)
+daily["Event_Next_3D"] = ((e1 + e2 + e3) > 0).astype(int)
+daily["Event_Next_7D"] = ((e1 + e2 + e3 + e4 + e5 + e6 + e7) > 0).astype(int)
+
+feature_cols = [
+    "Global_Daily_AvgTone_Sum",
+    "Tone_MA_28",
+    "Tone_Std_7",
+    "Tone_Lag_1",
+    "Tone_Lag_2",
+    "Tone_Lag_3",
+    "Event_Lag_1",
+    "Event_Lag_3",
+]
+
+daily_model = daily.dropna(subset=feature_cols).copy()
+
+# -------------------------
+# TRAIN / TEST SPLIT
+# -------------------------
+train_start_dt = pd.to_datetime(TRAIN_START)
+train_end_dt = pd.to_datetime(TRAIN_END)
+train_df = daily_model[(daily_model["Date"] >= train_start_dt) & (daily_model["Date"] <= train_end_dt)].copy()
+test_df = daily_model[daily_model["Date"] > train_end_dt].copy()
+
+ensure_dir(OUT_DIR)
+models_dir = os.path.join(OUT_DIR, "models")
+alerts_dir = os.path.join(OUT_DIR, "alerts")
+ensure_dir(models_dir)
+ensure_dir(alerts_dir)
+
+train_csv = os.path.join(OUT_DIR, f"train_df_{TRAIN_START.replace('-','')}_{TRAIN_END.replace('-','')}.csv")
+test_csv = os.path.join(OUT_DIR, f"test_df_post_{TRAIN_END.replace('-','')}.csv")
+_save_csv(train_df, train_csv)
+_save_csv(test_df, test_csv)
+
+diag = {
+    "train_rows": len(train_df),
+    "test_rows": len(test_df),
+    "train_start": str(train_df["Date"].min()) if len(train_df) > 0 else None,
+    "train_end": str(train_df["Date"].max()) if len(train_df) > 0 else None,
+    "test_start": str(test_df["Date"].min()) if len(test_df) > 0 else None,
+    "test_end": str(test_df["Date"].max()) if len(test_df) > 0 else None,
+}
+pd.DataFrame([diag]).to_csv(os.path.join(OUT_DIR, "training_diag.csv"), index=False)
+
+# -------------------------
+# MODEL TRAINING
+# -------------------------
+base_models = {
+    "Logistic Regression": LogisticRegression(class_weight="balanced", random_state=42, max_iter=1000),
+    "Random Forest": RandomForestClassifier(n_estimators=200, class_weight="balanced", random_state=42),
+}
+if XGBOOST_AVAILABLE:
+    xgb_template = xgb.XGBClassifier(n_estimators=200, use_label_encoder=False, eval_metric="logloss", verbosity=0)
+    base_models["XGBoost"] = xgb_template
+
+targets = [("Event_Next_1D", "1-day"), ("Event_Next_3D", "3-day"), ("Event_Next_7D", "7-day")]
+
+trained_models = {}
+results_summary_rows = []
+
+for target_col, horizon in targets:
+    trained_models[horizon] = {}
+    X_train = train_df[feature_cols]
+    y_train = train_df[target_col]
+    X_test = test_df[feature_cols]
+    y_test = test_df[target_col]
+
+    if (len(y_train) == 0) and (len(y_test) == 0):
+        results_summary_rows.append({"horizon": horizon, "status": "no_data"})
+        continue
+
+    for model_name, base_model in base_models.items():
+        row = {"horizon": horizon, "model": model_name, "train_n": len(y_train), "test_n": len(y_test)}
+        if len(np.unique(y_train)) < 2:
+            row.update({"status": "skip_train_only_one_class"})
+            results_summary_rows.append(row)
             continue
-            
-        # Time-series cross-validation
-        tscv = TimeSeriesSplit(n_splits=min(5, len(X) // 10))  # Adjust splits based on data size
-        
-        models = {
-            'Logistic Regression': LogisticRegression(class_weight='balanced', random_state=42, max_iter=1000),
-            'Random Forest': RandomForestClassifier(n_estimators=100, class_weight='balanced', random_state=42)
-        }
-        
-        for model_name, model in models.items():
-            cv_scores = []
-            cv_auc_scores = []
-            valid_folds = 0
-            
-            for fold, (train_idx, test_idx) in enumerate(tscv.split(X)):
-                X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
-                y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
-                
-                # Skip if no events in test set OR no non-events in test set
-                if y_test.sum() == 0 or (len(y_test) - y_test.sum()) == 0:
-                    continue
-                
-                # Skip if training set has only one class
-                if len(np.unique(y_train)) < 2:
-                    continue
-                
-                try:
-                    # Scale features for logistic regression
-                    if model_name == 'Logistic Regression':
-                        scaler = StandardScaler()
-                        X_train_scaled = scaler.fit_transform(X_train)
-                        X_test_scaled = scaler.transform(X_test)
-                        model.fit(X_train_scaled, y_train)
-                        y_pred_proba = model.predict_proba(X_test_scaled)[:, 1]
-                    else:
-                        model.fit(X_train, y_train)
-                        y_pred_proba = model.predict_proba(X_test)[:, 1]
-                    
-                    # Use optimal threshold based on precision-recall
-                    precision, recall, thresholds = precision_recall_curve(y_test, y_pred_proba)
-                    if len(thresholds) > 0:
-                        f1_scores = 2 * (precision[:-1] * recall[:-1]) / (precision[:-1] + recall[:-1] + 1e-8)
-                        optimal_threshold = thresholds[np.argmax(f1_scores)]
-                        y_pred = (y_pred_proba >= optimal_threshold).astype(int)
-                    else:
-                        y_pred = (y_pred_proba >= 0.5).astype(int)
-                    
-                    # Calculate metrics
-                    try:
-                        report = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
-                        f1 = report['1']['f1-score'] if '1' in report else 0.0
-                    except:
-                        f1 = 0.0
-                    
-                    try:
-                        auc_score = roc_auc_score(y_test, y_pred_proba)
-                    except:
-                        auc_score = 0.5
-                    
-                    cv_scores.append(f1)
-                    cv_auc_scores.append(auc_score)
-                    valid_folds += 1
-                    
-                except Exception as e:
-                    # Skip this fold if any error occurs
-                    continue
-            
-            if valid_folds > 0:  # Only if we have valid folds
-                avg_f1 = np.mean(cv_scores)
-                avg_auc = np.mean(cv_auc_scores)
-                
-                print(f"{model_name:20} | Avg F1: {avg_f1:.4f} | Avg AUC: {avg_auc:.4f} | Valid folds: {valid_folds}")
-                
-                results_summary[f'{model_name}_{horizon}'] = {
-                    'f1': avg_f1,
-                    'auc': avg_auc,
-                    'event_rate': y.mean(),
-                    'horizon': horizon,
-                    'valid_folds': valid_folds
+
+        try:
+            model_inst = clone(base_model)
+
+            if model_name == "Logistic Regression":
+                scaler = StandardScaler()
+                X_train_s = scaler.fit_transform(X_train)
+                X_test_s = scaler.transform(X_test)
+                model_inst.fit(X_train_s, y_train)
+                y_proba = model_inst.predict_proba(X_test_s)[:, 1]
+                trained_obj = ("pipeline", scaler, model_inst)
+            elif model_name == "XGBoost":
+                model_inst.fit(X_train.values, y_train.values)
+                y_proba = model_inst.predict_proba(X_test.values)[:, 1]
+                trained_obj = model_inst
+            else:
+                model_inst.fit(X_train, y_train)
+                y_proba = model_inst.predict_proba(X_test)[:, 1]
+                trained_obj = model_inst
+
+            precision_vals, recall_vals, thresholds = precision_recall_curve(y_test, y_proba)
+            if len(thresholds) > 0:
+                f1_scores = 2 * (precision_vals[:-1] * recall_vals[:-1]) / (precision_vals[:-1] + recall_vals[:-1] + 1e-8)
+                opt_th = thresholds[np.argmax(f1_scores)]
+            else:
+                opt_th = 0.5
+            y_pred = (y_proba >= opt_th).astype(int)
+
+            try:
+                auc = roc_auc_score(y_test, y_proba)
+            except Exception:
+                auc = np.nan
+            try:
+                report = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
+                f1 = report.get("1", {}).get("f1-score", 0.0)
+                precision_t = report.get("1", {}).get("precision", 0.0)
+                recall_t = report.get("1", {}).get("recall", 0.0)
+            except Exception:
+                f1 = precision_t = recall_t = 0.0
+
+            row.update(
+                {
+                    "status": "ok",
+                    "opt_threshold": float(opt_th),
+                    "auc": float(auc) if not np.isnan(auc) else None,
+                    "precision": float(precision_t),
+                    "recall": float(recall_t),
+                    "f1": float(f1),
                 }
-            else:
-                print(f"{model_name:20} | No valid folds with events in test set")
-    
-    # 3. TEST 3: Baseline Comparison for ALL horizons including D+7
-    print(f"\n3. BASELINE COMPARISON TEST")
-    print("-" * 50)
-    
-    # Compare baselines for all prediction horizons including D+7
-    horizons = ['1-day', '3-day', '7-day']
-    target_cols = ['Event_Next_1D', 'Event_Next_3D', 'Event_Next_7D']
-    
-    print("Baseline performance (always predict no events):")
-    print(f"{'Horizon':<10} | {'Accuracy':<10} | {'F1-Score':<10} | {'Event Rate':<10} | {'Note':<15}")
-    print("-" * 75)
-    
-    baseline_summary = {}
-    
-    for target_col, horizon in zip(target_cols, horizons):
-        if target_col in predictive_data_clean.columns:
-            event_rate = predictive_data_clean[target_col].mean()
-            baseline_accuracy = 1 - event_rate
-            baseline_f1 = 0.0  # F1 is 0 for always predicting no events
-            
-            # Determine baseline note
-            if event_rate > 0.9:
-                note = "POOR BASELINE"
-            elif event_rate > 0.7:
-                note = "LOW BASELINE"
-            else:
-                note = "REASONABLE"
-                
-            baseline_summary[horizon] = {
-                'accuracy': baseline_accuracy,
-                'f1': baseline_f1,
-                'event_rate': event_rate,
-                'note': note
-            }
-            
-            print(f"{horizon:<10} | {baseline_accuracy:>9.4f} | {baseline_f1:>9.4f} | {event_rate:>9.4f} | {note:>15}")
-    
-    # Compare with our models
-    if results_summary:
-        # Find best model for each horizon
-        horizon_results = {}
-        for key, result in results_summary.items():
-            horizon = result['horizon']
-            if horizon not in horizon_results or result['f1'] > horizon_results[horizon]['f1']:
-                horizon_results[horizon] = result
-        
-        print(f"\nBest model performance vs baseline:")
-        print(f"{'Horizon':<10} | {'Best F1':<10} | {'Baseline F1':<12} | {'Improvement':<12} | {'Status':<15}")
-        print("-" * 80)
-        
-        for horizon in ['1-day', '3-day']:  # Only show horizons we actually modeled with CV
-            if horizon in horizon_results:
-                best_f1 = horizon_results[horizon]['f1']
-                baseline_f1 = 0.0
-                improvement = best_f1 - baseline_f1
-                
-                # Determine status
-                if improvement > 0.3:
-                    status = "EXCELLENT"
-                elif improvement > 0.2:
-                    status = "GOOD"
-                elif improvement > 0.1:
-                    status = "MODERATE"
-                else:
-                    status = "POOR"
-                
-                print(f"{horizon:<10} | {best_f1:>9.4f} | {baseline_f1:>11.4f} | {improvement:>11.4f} | {status:>15}")
-    
-    # 4. TEST 4: Practical Significance Test for ALL horizons including D+7
-    print(f"\n4. PRACTICAL SIGNIFICANCE TEST (Full Dataset Analysis)")
-    print("-" * 60)
-    
-    # Test different thresholds for ALL horizons including D+7
-    for target_col, horizon in [('Event_Next_1D', '1-day'), ('Event_Next_3D', '3-day'), ('Event_Next_7D', '7-day')]:
-        if target_col in predictive_data_clean.columns and len(feature_cols) > 0:
-            X_full = predictive_data_clean[feature_cols]
-            y_full = predictive_data_clean[target_col]
-            
-            if y_full.sum() > 0 and (len(y_full) - y_full.sum()) > 0:  # Need both classes
-                # Use Random Forest for final analysis
-                rf_model = RandomForestClassifier(n_estimators=100, class_weight='balanced', random_state=42)
-                rf_model.fit(X_full, y_full)
-                y_pred_proba = rf_model.predict_proba(X_full)[:, 1]
-                
-                # Test different thresholds
-                thresholds = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
-                print(f"\n{horizon} prediction - Performance at different thresholds:")
-                print(f"{'Threshold':<10} | {'Precision':<10} | {'Recall':<10} | {'F1-Score':<10} | {'Alerts':<10} | {'TP':<8} | {'FP':<8}")
-                print("-" * 85)
-                
-                best_f1 = 0
-                best_threshold = 0.5
-                
-                for threshold in thresholds:
-                    y_pred = (y_pred_proba >= threshold).astype(int)
-                    report = classification_report(y_full, y_pred, output_dict=True, zero_division=0)
-                    try:
-                        precision = report['1']['precision'] if '1' in report else 0.0
-                        recall = report['1']['recall'] if '1' in report else 0.0
-                        f1 = report['1']['f1-score'] if '1' in report else 0.0
-                        
-                        # Calculate TP and FP
-                        tp = ((y_pred == 1) & (y_full == 1)).sum()
-                        fp = ((y_pred == 1) & (y_full == 0)).sum()
-                        
-                    except:
-                        precision = recall = f1 = 0.0
-                        tp = fp = 0
-                    
-                    alerts_count = y_pred.sum()
-                    
-                    # Track best threshold
-                    if f1 > best_f1:
-                        best_f1 = f1
-                        best_threshold = threshold
-                    
-                    print(f"{threshold:>9.1f} | {precision:>9.3f} | {recall:>9.3f} | {f1:>9.3f} | {alerts_count:>9} | {tp:>7} | {fp:>7}")
-                
-                # Print best threshold recommendation
-                print(f"→ Best threshold for {horizon}: {best_threshold:.1f} (F1: {best_f1:.3f})")
-                
-                # Special analysis for D+7 due to high event rate
-                if horizon == '7-day':
-                    print(f"\nD+7 SPECIAL ANALYSIS (High Event Rate: {y_full.mean():.3f}):")
-                    print(f"- Majority class baseline (always predict event): Accuracy = {y_full.mean():.3f}")
-                    print(f"- Current best model F1: {best_f1:.3f}")
-                    
-                    # Check if model is better than majority class
-                    if best_f1 > 0.5:  # Arbitrary threshold for "useful"
-                        print(f"- CONCLUSION: Model provides useful predictions despite high event rate")
-                    else:
-                        print(f"- CONCLUSION: Model struggles due to class imbalance")
-                        
-            else:
-                print(f"Insufficient class balance for {horizon} threshold analysis")
-        else:
-            print(f"Insufficient data for {horizon} practical significance test")
-    
-    # 5. FINAL VERDICT with horizon comparison including D+7 insights
-    print(f"\n5. FINAL VERDICT: Can Daily_AvgTone Predict Events?")
-    print("-" * 50)
-    
-    if results_summary or 'Event_Next_7D' in predictive_data_clean.columns:
-        # Criteria for "useful" prediction
-        useful_f1_threshold = 0.3
-        useful_auc_threshold = 0.7
-        
-        # Group results by horizon
-        horizon_performance = {}
-        for key, result in results_summary.items():
-            horizon = result['horizon']
-            if horizon not in horizon_performance:
-                horizon_performance[horizon] = []
-            horizon_performance[horizon].append(result)
-        
-        print("Performance by prediction horizon:")
-        print(f"{'Horizon':<10} | {'Best F1':<10} | {'Best AUC':<10} | {'Event Rate':<10} | {'Verdict':<15}")
-        print("-" * 80)
-        
-        best_overall_f1 = 0.0
-        best_overall_auc = 0.0
-        useful_horizons = []
-        
-        # Check modeled horizons
-        for horizon in ['1-day', '3-day']:
-            if horizon in horizon_performance:
-                horizon_f1 = max([r['f1'] for r in horizon_performance[horizon]])
-                horizon_auc = max([r['auc'] for r in horizon_performance[horizon]])
-                event_rate = horizon_performance[horizon][0]['event_rate']
-                
-                f1_useful = horizon_f1 >= useful_f1_threshold
-                auc_useful = horizon_auc >= useful_auc_threshold
-                
-                verdict = "USEFUL" if (f1_useful or auc_useful) else "NOT USEFUL"
-                if f1_useful or auc_useful:
-                    useful_horizons.append(horizon)
-                
-                # Update overall best
-                best_overall_f1 = max(best_overall_f1, horizon_f1)
-                best_overall_auc = max(best_overall_auc, horizon_auc)
-                
-                print(f"{horizon:<10} | {horizon_f1:>9.4f} | {horizon_auc:>9.4f} | {event_rate:>9.4f} | {verdict:>15}")
-        
-        # Special analysis for D+7
-        if 'Event_Next_7D' in predictive_data_clean.columns:
-            d7_event_rate = predictive_data_clean['Event_Next_7D'].mean()
-            print(f"{'7-day':<10} | {'N/A':>9} | {'N/A':>9} | {d7_event_rate:>9.4f} | {'HIGH EVENT RATE':>15}")
-            
-            # Provide D+7 specific insight
-            if d7_event_rate > 0.9:
-                print(f"→ D+7 NOTE: Very high event rate ({d7_event_rate:.3f}) limits predictive value")
-            elif d7_event_rate > 0.7:
-                print(f"→ D+7 NOTE: High event rate ({d7_event_rate:.3f}) - focus on precision over recall")
-        
-        print(f"\nOverall Best F1-Score: {best_overall_f1:.4f}")
-        print(f"Overall Best AUC: {best_overall_auc:.4f}")
-        
-        if useful_horizons:
-            print(f"\nCONCLUSION: Daily_AvgTone CAN predict event occurrence for {', '.join(useful_horizons)} horizons")
-            print("Recommended use: Early warning system with appropriate thresholds")
-            
-            # D+7 specific recommendation
-            if 'Event_Next_7D' in predictive_data_clean.columns:
-                d7_event_rate = predictive_data_clean['Event_Next_7D'].mean()
-                if d7_event_rate > 0.7:
-                    print(f"D+7 NOTE: 7-day predictions may have limited utility due to high baseline event rate ({d7_event_rate:.1%})")
-        else:
-            print(f"\nCONCLUSION: Daily_AvgTone CANNOT reliably predict event occurrence")
-            print("It correlates with event intensity but cannot forecast when events will happen")
-        
-        final_verdict = 'CAN predict' if useful_horizons else 'CANNOT predict'
-    else:
-        print("No valid results - insufficient data for conclusion")
-        final_verdict = 'INCONCLUSIVE'
-        best_overall_f1 = 0.0
-        best_overall_auc = 0.0
-    
-    return {
-        'predictive_data': predictive_data_clean,
-        'results_summary': results_summary,
-        'baseline_summary': baseline_summary,
-        'final_verdict': final_verdict,
-        'best_f1': best_overall_f1,
-        'best_auc': best_overall_auc
-    }
+            )
 
-# Run the predictive power test
-results = test_tone_predictive_power(df, attacks)
+            model_fname = f"model_{horizon.replace(' ','_')}_{model_name.replace(' ','_')}.pkl"
+            model_path = os.path.join(models_dir, model_fname)
+            _save_pickle(trained_obj, model_path)
+            row["model_path"] = model_path
 
+            trained_models[horizon][model_name] = trained_obj
 
+        except Exception as e:
+            row.update({"status": "error", "error": str(e)})
 
+        results_summary_rows.append(row)
 
+results_df = pd.DataFrame(results_summary_rows)
+results_csv = os.path.join(OUT_DIR, f"results_summary_{TRAIN_START.replace('-','')}_{TRAIN_END.replace('-','')}.csv")
+_save_csv(results_df, results_csv)
+_save_pickle(results_summary_rows, os.path.join(models_dir, f"results_summary_{TRAIN_START.replace('-','')}_{TRAIN_END.replace('-','')}.pkl"))
 
-
-
-
-
-def create_alert_table(df, attacks):
-    """Apply prediction thresholds to all daily data and create alert table"""
-    
-    print("="*70)
-    print("DAILY ALERT TABLE - Applying Thresholds to All Data")
-    print("="*70)
-    
-    # Clean data
-    clean_data = df
-    clean_data['Date'] = pd.to_datetime(clean_data['Date'])
-    clean_data = clean_data.sort_values('Date')
-    
-    # Create complete date range
-    start_date = clean_data['Date'].min()
-    end_date = clean_data['Date'].max()
-    all_dates = pd.date_range(start=start_date, end=end_date, freq='D')
-    
-    #split tables to aggregate data
-    daily_attacks=attacks.drop_duplicates()
-    
-    daily_attacks['Date']=daily_attacks['event_date']
-    
-    attacks_aggregated = daily_attacks.groupby('Date').agg({
-        'event_count': 'sum'
-    }).reset_index()
-    
-    
-    
-    merged_df=clean_data.drop_duplicates()
-    
-    
-    # Aggregate daily data
-    merged_aggregated = merged_df.groupby('Date').agg({
-        'Daily_AvgTone': 'sum'
-
-    }).reset_index()
-    
-    daily_aggregated=pd.merge(merged_aggregated, attacks_aggregated, on='Date')
-    #daily_aggregated = merged_aggregated.merge(attacks_aggregated,how='cross')
-    
-    
-    
-    #print(daily_aggregated)
-    
-    #daily_aggregated.to_excel("daily.xlsx", index=False)
-
-    #exit()
-    daily_aggregated.columns = ['Date', 'Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum']
-
-    # Create complete daily dataset
-    daily_global = pd.DataFrame({'Date': all_dates})
-    daily_global = daily_global.merge(daily_aggregated, on='Date', how='left')
-    daily_global[['Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum']] = daily_global[['Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum']].fillna(0)
-    
-    # Create binary event indicator
-    daily_global['Event_Occurred'] = (daily_global['Global_Event_Count_Sum'] > 0).astype(int)
-
-    # Feature engineering for prediction
-    predictive_data = daily_global.copy().sort_values('Date')
-    
-    # Calculate features
-    predictive_data['Tone_MA_3'] = predictive_data['Global_Daily_AvgTone_Sum'].rolling(3).mean()
-    predictive_data['Tone_MA_7'] = predictive_data['Global_Daily_AvgTone_Sum'].rolling(7).mean()
-    predictive_data['Tone_Std_7'] = predictive_data['Global_Daily_AvgTone_Sum'].rolling(7).std()
-    
-    for lag in [1, 2, 3, 7]:
-        predictive_data[f'Tone_Lag_{lag}'] = predictive_data['Global_Daily_AvgTone_Sum'].shift(lag)
-    
-    predictive_data['Event_Lag_1'] = predictive_data['Event_Occurred'].shift(1)
-    predictive_data['Event_Lag_3'] = predictive_data['Event_Occurred'].shift(3)
-    predictive_data['Event_Lag_7'] = predictive_data['Event_Occurred'].shift(7)
-
-    # Target: events in next 3 days and next 7 days
-    event_next_1 = predictive_data['Event_Occurred'].shift(-1).fillna(0).astype(int)
-    event_next_2 = predictive_data['Event_Occurred'].shift(-2).fillna(0).astype(int)
-    event_next_3 = predictive_data['Event_Occurred'].shift(-3).fillna(0).astype(int)
-    event_next_4 = predictive_data['Event_Occurred'].shift(-4).fillna(0).astype(int)
-    event_next_5 = predictive_data['Event_Occurred'].shift(-5).fillna(0).astype(int)
-    event_next_6 = predictive_data['Event_Occurred'].shift(-6).fillna(0).astype(int)
-    event_next_7 = predictive_data['Event_Occurred'].shift(-7).fillna(0).astype(int)
-    
-    predictive_data['Event_Next_3D'] = ((event_next_1 + event_next_2 + event_next_3) > 0).astype(int)
-    predictive_data['Event_Next_7D'] = ((event_next_1 + event_next_2 + event_next_3 + event_next_4 + event_next_5 + event_next_6 + event_next_7) > 0).astype(int)
-    predictive_data_clean = predictive_data.dropna()
-    
-    # Features for prediction
-    feature_cols = ['Global_Daily_AvgTone_Sum', 'Tone_MA_3', 'Tone_MA_7', 'Tone_Std_7',
-                   'Tone_Lag_1', 'Tone_Lag_2', 'Tone_Lag_3', 'Event_Lag_1', 'Event_Lag_3']
-    
-    X = predictive_data_clean[feature_cols]
-    y_3d = predictive_data_clean['Event_Next_3D']
-    y_7d = predictive_data_clean['Event_Next_7D']
-    
-    # Train models for both timeframes
-    from sklearn.ensemble import RandomForestClassifier
-    model_3d = RandomForestClassifier(n_estimators=100, class_weight='balanced', random_state=42)
-    model_7d = RandomForestClassifier(n_estimators=100, class_weight='balanced', random_state=42)
-    
-    model_3d.fit(X, y_3d)
-    model_7d.fit(X, y_7d)
-    
-    # Get prediction probabilities for both timeframes
-    prediction_probabilities_3d = model_3d.predict_proba(X)[:, 1]
-    prediction_probabilities_7d = model_7d.predict_proba(X)[:, 1]
-    
-    predictive_data_clean['Prediction_Probability_3D'] = prediction_probabilities_3d
-    predictive_data_clean['Prediction_Probability_7D'] = prediction_probabilities_7d
-    
-    # Apply thresholds for both timeframes
-    tier1_threshold = 0.3
-    tier2_threshold = 0.5
-    
-    predictive_data_clean['Tier1_Alert_3D'] = (predictive_data_clean['Prediction_Probability_3D'] >= tier1_threshold).astype(int)
-    predictive_data_clean['Tier2_Alert_3D'] = (predictive_data_clean['Prediction_Probability_3D'] >= tier2_threshold).astype(int)
-    predictive_data_clean['Tier1_Alert_7D'] = (predictive_data_clean['Prediction_Probability_7D'] >= tier1_threshold).astype(int)
-    predictive_data_clean['Tier2_Alert_7D'] = (predictive_data_clean['Prediction_Probability_7D'] >= tier2_threshold).astype(int)
-    
-    # Create the alert table
-    alert_table = predictive_data_clean[[
-        'Date', 'Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum', 
-        'Event_Occurred', 'Event_Next_3D', 'Event_Next_7D',
-        'Prediction_Probability_3D', 'Prediction_Probability_7D',
-        'Tier1_Alert_3D', 'Tier2_Alert_3D', 'Tier1_Alert_7D', 'Tier2_Alert_7D'
-    ]].copy()
-    
-    # Add alert descriptions for both timeframes
-    alert_table['Tier1_Alert_3D_Text'] = alert_table['Tier1_Alert_3D'].map({1: 'ALERT', 0: 'No Alert'})
-    alert_table['Tier2_Alert_3D_Text'] = alert_table['Tier2_Alert_3D'].map({1: 'HIGH ALERT', 0: 'No Alert'})
-    alert_table['Tier1_Alert_7D_Text'] = alert_table['Tier1_Alert_7D'].map({1: 'ALERT', 0: 'No Alert'})
-    alert_table['Tier2_Alert_7D_Text'] = alert_table['Tier2_Alert_7D'].map({1: 'HIGH ALERT', 0: 'No Alert'})
-    
-    # Add performance evaluation for both timeframes
-    alert_table['Correct_Prediction_3D'] = (
-        ((alert_table['Tier1_Alert_3D'] == 1) & (alert_table['Event_Next_3D'] == 1)) |
-        ((alert_table['Tier1_Alert_3D'] == 0) & (alert_table['Event_Next_3D'] == 0))
-    ).astype(int)
-    
-    alert_table['Correct_Prediction_7D'] = (
-        ((alert_table['Tier1_Alert_7D'] == 1) & (alert_table['Event_Next_7D'] == 1)) |
-        ((alert_table['Tier1_Alert_7D'] == 0) & (alert_table['Event_Next_7D'] == 0))
-    ).astype(int)
-    
-    # Print summary statistics for both timeframes
-    print(f"\nSUMMARY STATISTICS:")
-    print("-" * 60)
-    print(f"Total days analyzed: {len(alert_table)}")
-    print(f"\nD+3 PREDICTIONS:")
-    print(f"Days with events (next 3D): {alert_table['Event_Next_3D'].sum()} ({alert_table['Event_Next_3D'].mean()*100:.1f}%)")
-    print(f"Tier 1 Alerts triggered: {alert_table['Tier1_Alert_3D'].sum()} ({alert_table['Tier1_Alert_3D'].mean()*100:.1f}%)")
-    print(f"Tier 2 Alerts triggered: {alert_table['Tier2_Alert_3D'].sum()} ({alert_table['Tier2_Alert_3D'].mean()*100:.1f}%)")
-    print(f"Overall accuracy: {alert_table['Correct_Prediction_3D'].mean()*100:.1f}%")
-    
-    print(f"\nD+7 PREDICTIONS:")
-    print(f"Days with events (next 7D): {alert_table['Event_Next_7D'].sum()} ({alert_table['Event_Next_7D'].mean()*100:.1f}%)")
-    print(f"Tier 1 Alerts triggered: {alert_table['Tier1_Alert_7D'].sum()} ({alert_table['Tier1_Alert_7D'].mean()*100:.1f}%)")
-    print(f"Tier 2 Alerts triggered: {alert_table['Tier2_Alert_7D'].sum()} ({alert_table['Tier2_Alert_7D'].mean()*100:.1f}%)")
-    print(f"Overall accuracy: {alert_table['Correct_Prediction_7D'].mean()*100:.1f}%")
-    
-    # Show recent alerts (last 30 days) for both timeframes
-    recent_alerts = alert_table.tail(30).copy()
-    
-    print(f"\nRECENT ALERTS - D+3 (Last 30 days):")
-    print("-" * 120)
-    print(f"{'Date':<12} | {'Tone':<8} | {'Prob3D':<7} | {'Tier1_3D':<10} | {'Tier2_3D':<12} | {'Event Next 3D':<13} | {'Match':<6}")
-    print("-" * 120)
-    
-    for _, row in recent_alerts.iterrows():
-        date_str = row['Date'].strftime('%Y-%m-%d')
-        tone = row['Global_Daily_AvgTone_Sum']
-        prob_3d = row['Prediction_Probability_3D']
-        tier1_3d = row['Tier1_Alert_3D_Text']
-        tier2_3d = row['Tier2_Alert_3D_Text']
-        event_next_3d = "EVENT" if row['Event_Next_3D'] else "No Event"
-        match_3d = "✓" if row['Correct_Prediction_3D'] else "✗"
-        
-        print(f"{date_str} | {tone:>7.2f} | {prob_3d:>6.3f} | {tier1_3d:>10} | {tier2_3d:>12} | {event_next_3d:>13} | {match_3d:>6}")
-    
-    print(f"\nRECENT ALERTS - D+7 (Last 30 days):")
-    print("-" * 120)
-    print(f"{'Date':<12} | {'Tone':<8} | {'Prob7D':<7} | {'Tier1_7D':<10} | {'Tier2_7D':<12} | {'Event Next 7D':<13} | {'Match':<6}")
-    print("-" * 120)
-    
-    for _, row in recent_alerts.iterrows():
-        date_str = row['Date'].strftime('%Y-%m-%d')
-        tone = row['Global_Daily_AvgTone_Sum']
-        prob_7d = row['Prediction_Probability_7D']
-        tier1_7d = row['Tier1_Alert_7D_Text']
-        tier2_7d = row['Tier2_Alert_7D_Text']
-        event_next_7d = "EVENT" if row['Event_Next_7D'] else "No Event"
-        match_7d = "✓" if row['Correct_Prediction_7D'] else "✗"
-        
-        print(f"{date_str} | {tone:>7.2f} | {prob_7d:>6.3f} | {tier1_7d:>10} | {tier2_7d:>12} | {event_next_7d:>13} | {match_7d:>6}")
-    
-    # Show highest probability alerts for both timeframes
-    high_prob_alerts_3d = alert_table.nlargest(10, 'Prediction_Probability_3D')[['Date', 'Global_Daily_AvgTone_Sum', 'Prediction_Probability_3D', 'Event_Next_3D']]
-    high_prob_alerts_7d = alert_table.nlargest(10, 'Prediction_Probability_7D')[['Date', 'Global_Daily_AvgTone_Sum', 'Prediction_Probability_7D', 'Event_Next_7D']]
-    
-    print(f"\nTOP 10 HIGHEST PROBABILITY ALERTS - D+3:")
-    print("-" * 70)
-    print(f"{'Date':<12} | {'Tone':<8} | {'Probability':<12} | {'Event Occurred':<14}")
-    print("-" * 70)
-    
-    for _, row in high_prob_alerts_3d.iterrows():
-        date_str = row['Date'].strftime('%Y-%m-%d')
-        tone = row['Global_Daily_AvgTone_Sum']
-        prob = row['Prediction_Probability_3D']
-        event_occurred = "✓ EVENT" if row['Event_Next_3D'] else "✗ No Event"
-        
-        print(f"{date_str} | {tone:>7.2f} | {prob:>11.3f} | {event_occurred:>14}")
-    
-    print(f"\nTOP 10 HIGHEST PROBABILITY ALERTS - D+7:")
-    print("-" * 70)
-    print(f"{'Date':<12} | {'Tone':<8} | {'Probability':<12} | {'Event Occurred':<14}")
-    print("-" * 70)
-    
-    for _, row in high_prob_alerts_7d.iterrows():
-        date_str = row['Date'].strftime('%Y-%m-%d')
-        tone = row['Global_Daily_AvgTone_Sum']
-        prob = row['Prediction_Probability_7D']
-        event_occurred = "✓ EVENT" if row['Event_Next_7D'] else "✗ No Event"
-        
-        print(f"{date_str} | {tone:>7.2f} | {prob:>11.3f} | {event_occurred:>14}")
-    
-    # Performance by threshold for both timeframes
-    print(f"\nPERFORMANCE BY THRESHOLD LEVEL - D+3:")
-    print("-" * 60)
-    print(f"{'Threshold':<10} | {'Alerts':<8} | {'Precision':<10} | {'Recall':<8} | {'F1':<6}")
-    print("-" * 60)
-    
-    thresholds = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
-    for threshold in thresholds:
-        alerts = (alert_table['Prediction_Probability_3D'] >= threshold).astype(int)
-        true_positives = ((alerts == 1) & (alert_table['Event_Next_3D'] == 1)).sum()
-        false_positives = ((alerts == 1) & (alert_table['Event_Next_3D'] == 0)).sum()
-        false_negatives = ((alerts == 0) & (alert_table['Event_Next_3D'] == 1)).sum()
-        
-        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
-        recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
-        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-        
-        print(f"{threshold:>9.1f} | {alerts.sum():>7} | {precision:>9.3f} | {recall:>7.3f} | {f1:>5.3f}")
-    
-    print(f"\nPERFORMANCE BY THRESHOLD LEVEL - D+7:")
-    print("-" * 60)
-    print(f"{'Threshold':<10} | {'Alerts':<8} | {'Precision':<10} | {'Recall':<8} | {'F1':<6}")
-    print("-" * 60)
-    
-    for threshold in thresholds:
-        alerts = (alert_table['Prediction_Probability_7D'] >= threshold).astype(int)
-        true_positives = ((alerts == 1) & (alert_table['Event_Next_7D'] == 1)).sum()
-        false_positives = ((alerts == 1) & (alert_table['Event_Next_7D'] == 0)).sum()
-        false_negatives = ((alerts == 0) & (alert_table['Event_Next_7D'] == 1)).sum()
-        
-        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
-        recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
-        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-        
-        print(f"{threshold:>9.1f} | {alerts.sum():>7} | {precision:>9.3f} | {recall:>7.3f} | {f1:>5.3f}")
-    
-    return alert_table
-
-# Create the comprehensive alert table
-alert_table = create_alert_table(df, attacks)
-
-
-def analyze_alert_patterns(alert_table):
-    """Analyze patterns and trends in alert triggers"""
-    
-    print("="*70)
-    print("ALERT PATTERN ANALYSIS")
-    print("="*70)
-    
-    # Make sure we have the required columns
-    print("Available columns in alert_table:", alert_table.columns.tolist())
-    
-    # Check which alert columns exist and use them
-    available_columns = alert_table.columns.tolist()
-    
-    # Use D+3 alerts by default (since they were in the original function)
-    tier1_col = 'Tier1_Alert_3D' if 'Tier1_Alert_3D' in available_columns else 'Tier1_Alert'
-    tier2_col = 'Tier2_Alert_3D' if 'Tier2_Alert_3D' in available_columns else 'Tier2_Alert'
-    prob_col = 'Prediction_Probability_3D' if 'Prediction_Probability_3D' in available_columns else 'Prediction_Probability'
-    event_next_col = 'Event_Next_3D' if 'Event_Next_3D' in available_columns else 'Event_Next_3D'
-    
-    print(f"Using columns: {tier1_col}, {tier2_col}, {prob_col}, {event_next_col}")
-    
-    # Ensure Date is datetime
-    alert_table = alert_table.copy()
-    alert_table['Date'] = pd.to_datetime(alert_table['Date'])
-    
-    # Extract time components
-    alert_table['Year'] = alert_table['Date'].dt.year
-    alert_table['Month'] = alert_table['Date'].dt.month
-    alert_table['YearMonth'] = alert_table['Date'].dt.to_period('M')
-    alert_table['DayOfWeek'] = alert_table['Date'].dt.dayofweek
-    alert_table['Week'] = alert_table['Date'].dt.isocalendar().week
-    
-    # 1. Monthly Trends
-    print(f"\n1. MONTHLY ALERT TRENDS")
-    print("-" * 50)
-    
-    monthly_stats = alert_table.groupby('YearMonth').agg({
-        tier1_col: 'sum',
-        tier2_col: 'sum',
-        event_next_col: 'sum',
-        prob_col: 'mean'
-    }).reset_index()
-    
-    monthly_stats.columns = ['YearMonth', 'Tier1_Alerts', 'Tier2_Alerts', 'Actual_Events', 'Avg_Probability']
-    
-    print(f"{'Year-Month':<12} | {'Tier1':<6} | {'Tier2':<6} | {'Events':<7} | {'Avg Prob':<9}")
-    print("-" * 60)
-    
-    for _, row in monthly_stats.iterrows():
-        print(f"{str(row['YearMonth']):<12} | {row['Tier1_Alerts']:>5} | {row['Tier2_Alerts']:>5} | {row['Actual_Events']:>6} | {row['Avg_Probability']:>8.3f}")
-    
-    # 2. Day of Week Patterns
-    print(f"\n2. DAY OF WEEK PATTERNS")
-    print("-" * 50)
-    
-    dow_mapping = {0: 'Monday', 1: 'Tuesday', 2: 'Wednesday', 3: 'Thursday', 
-                  4: 'Friday', 5: 'Saturday', 6: 'Sunday'}
-    
-    dow_stats = alert_table.groupby('DayOfWeek').agg({
-        tier1_col: ['sum', 'mean'],
-        tier2_col: ['sum', 'mean'],
-        event_next_col: ['sum', 'mean'],
-        prob_col: 'mean'
-    }).round(4).reset_index()
-    
-    dow_stats.columns = ['DayOfWeek', 'Tier1_Count', 'Tier1_Rate', 'Tier2_Count', 'Tier2_Rate', 
-                        'Events_Count', 'Events_Rate', 'Avg_Probability']
-    
-    print(f"{'Day':<10} | {'Tier1 Rate':<10} | {'Tier2 Rate':<10} | {'Event Rate':<10} | {'Avg Prob':<9}")
-    print("-" * 70)
-    
-    for _, row in dow_stats.iterrows():
-        day_name = dow_mapping[row['DayOfWeek']]
-        print(f"{day_name:<10} | {row['Tier1_Rate']:>9.3f} | {row['Tier2_Rate']:>9.3f} | {row['Events_Rate']:>9.3f} | {row['Avg_Probability']:>8.3f}")
-    
-    # 3. Alert Clustering Analysis
-    print(f"\n3. ALERT CLUSTERING ANALYSIS")
-    print("-" * 50)
-    
-    # Find alert sequences
-    alert_sequences = []
-    current_sequence = []
-    
-    for i, row in alert_table.iterrows():
-        if row[tier1_col] == 1:
-            current_sequence.append(row['Date'])
-        else:
-            if len(current_sequence) >= 2:  # Only consider sequences of 2+ alerts
-                alert_sequences.append(current_sequence)
-            current_sequence = []
-    
-    # Don't forget the last sequence
-    if len(current_sequence) >= 2:
-        alert_sequences.append(current_sequence)
-    
-    print(f"Number of alert clusters (2+ consecutive days): {len(alert_sequences)}")
-    
-    if alert_sequences:
-        cluster_lengths = [len(seq) for seq in alert_sequences]
-        print(f"Cluster length - Min: {min(cluster_lengths)}, Max: {max(cluster_lengths)}, Avg: {np.mean(cluster_lengths):.1f}")
-        
-        # Show top 5 longest clusters
-        longest_clusters = sorted(alert_sequences, key=len, reverse=True)[:5]
-        print(f"\nTop 5 longest alert clusters:")
-        for i, cluster in enumerate(longest_clusters, 1):
-            start_date = cluster[0].strftime('%Y-%m-%d')
-            end_date = cluster[-1].strftime('%Y-%m-%d')
-            duration = (cluster[-1] - cluster[0]).days + 1
-            print(f"  {i}. {start_date} to {end_date} ({duration} days, {len(cluster)} alerts)")
-    
-    # 4. Performance by Alert Probability Bins
-    print(f"\n4. PERFORMANCE BY PROBABILITY BINS")
-    print("-" * 50)
-    
-    alert_table['Prob_Bin'] = pd.cut(alert_table[prob_col], 
-                                    bins=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
-                                    labels=['0-0.1', '0.1-0.2', '0.2-0.3', '0.3-0.4', '0.4-0.5', 
-                                           '0.5-0.6', '0.6-0.7', '0.7-0.8', '0.8-0.9', '0.9-1.0'])
-    
-    bin_stats = alert_table.groupby('Prob_Bin').agg({
-        tier1_col: 'count',
-        event_next_col: 'sum'
-    }).reset_index()
-    
-    bin_stats['Event_Rate'] = bin_stats[event_next_col] / bin_stats[tier1_col]
-    bin_stats['Alert_Count'] = bin_stats[tier1_col]
-    
-    print(f"{'Prob Bin':<10} | {'Alerts':<8} | {'Events':<8} | {'Event Rate':<10}")
-    print("-" * 50)
-    
-    for _, row in bin_stats.iterrows():
-        if row['Alert_Count'] > 0:
-            print(f"{row['Prob_Bin']:<10} | {row['Alert_Count']:>7} | {row[event_next_col]:>7} | {row['Event_Rate']:>9.3f}")
-    
-    # 5. Seasonal Analysis
-    print(f"\n5. SEASONAL ANALYSIS")
-    print("-" * 50)
-    
-    alert_table['Season'] = alert_table['Month'].map({
-        12: 'Winter', 1: 'Winter', 2: 'Winter',
-        3: 'Spring', 4: 'Spring', 5: 'Spring',
-        6: 'Summer', 7: 'Summer', 8: 'Summer',
-        9: 'Fall', 10: 'Fall', 11: 'Fall'
-    })
-    
-    seasonal_stats = alert_table.groupby('Season').agg({
-        tier1_col: ['sum', 'mean'],
-        tier2_col: ['sum', 'mean'],
-        event_next_col: ['sum', 'mean'],
-        prob_col: 'mean'
-    }).round(4).reset_index()
-    
-    seasonal_stats.columns = ['Season', 'Tier1_Count', 'Tier1_Rate', 'Tier2_Count', 'Tier2_Rate', 
-                             'Events_Count', 'Events_Rate', 'Avg_Probability']
-    
-    print(f"{'Season':<8} | {'Tier1 Rate':<10} | {'Tier2 Rate':<10} | {'Event Rate':<10} | {'Avg Prob':<9}")
-    print("-" * 65)
-    
-    for season in ['Winter', 'Spring', 'Summer', 'Fall']:
-        row = seasonal_stats[seasonal_stats['Season'] == season].iloc[0]
-        print(f"{season:<8} | {row['Tier1_Rate']:>9.3f} | {row['Tier2_Rate']:>9.3f} | {row['Events_Rate']:>9.3f} | {row['Avg_Probability']:>8.3f}")
-    
-    # 6. Compare D+3 and D+7 patterns if both exist
-    if 'Tier1_Alert_7D' in available_columns and 'Tier1_Alert_3D' in available_columns:
-        print(f"\n6. D+3 vs D+7 COMPARISON")
-        print("-" * 50)
-        
-        comparison_stats = alert_table.agg({
-            'Tier1_Alert_3D': ['sum', 'mean'],
-            'Tier2_Alert_3D': ['sum', 'mean'],
-            'Tier1_Alert_7D': ['sum', 'mean'],
-            'Tier2_Alert_7D': ['sum', 'mean'],
-            'Event_Next_3D': ['sum', 'mean'],
-            'Event_Next_7D': ['sum', 'mean'],
-            'Prediction_Probability_3D': 'mean',
-            'Prediction_Probability_7D': 'mean'
-        }).round(4)
-        
-        print(f"{'Metric':<20} | {'D+3':<10} | {'D+7':<10} | {'Difference':<12}")
-        print("-" * 60)
-        
-        metrics = [
-            ('Tier1 Alert Rate', 'Tier1_Alert_3D', 'mean', 'Tier1_Alert_7D', 'mean'),
-            ('Tier2 Alert Rate', 'Tier2_Alert_3D', 'mean', 'Tier2_Alert_7D', 'mean'),
-            ('Event Rate', 'Event_Next_3D', 'mean', 'Event_Next_7D', 'mean'),
-            ('Avg Probability', 'Prediction_Probability_3D', 'mean', 'Prediction_Probability_7D', 'mean')
-        ]
-        
-        for metric_name, col3d, stat3d, col7d, stat7d in metrics:
-            val3d = comparison_stats.loc[stat3d, col3d]
-            val7d = comparison_stats.loc[stat7d, col7d]
-            diff = val7d - val3d
-            print(f"{metric_name:<20} | {val3d:>9.3f} | {val7d:>9.3f} | {diff:>11.3f}")
-    
-    return {
-        'monthly_stats': monthly_stats,
-        'dow_stats': dow_stats,
-        'alert_sequences': alert_sequences,
-        'bin_stats': bin_stats,
-        'seasonal_stats': seasonal_stats
-    }
-
-
-# Run pattern analysis
-analyze_alert_patterns(alert_table)
-
-
-
-def save_alert_table(alert_table, filename="alert_table_detailed.csv"):
-    """Save the alert table with additional formatting and analysis"""
-    
-    print("="*70)
-    print("SAVING ALERT TABLE")
-    print("="*70)
-    
-    # Make a copy to avoid modifying the original
-    detailed_table = alert_table.copy()
-    
-    # Check which columns exist and use appropriate ones
-    available_columns = detailed_table.columns.tolist()
-    print(f"Available columns: {available_columns}")
-    
-    # Determine which alert columns to use
-    if 'Tier1_Alert_3D' in available_columns and 'Tier2_Alert_3D' in available_columns:
-        # Use D+3 alerts (new format)
-        tier1_col = 'Tier1_Alert_3D'
-        tier2_col = 'Tier2_Alert_3D'
-        prob_col = 'Prediction_Probability_3D'
-        event_next_col = 'Event_Next_3D'
-        print("Using D+3 alert columns")
-    elif 'Tier1_Alert' in available_columns and 'Tier2_Alert' in available_columns:
-        # Use original alert columns
-        tier1_col = 'Tier1_Alert'
-        tier2_col = 'Tier2_Alert'
-        prob_col = 'Prediction_Probability'
-        event_next_col = 'Event_Next_3D'
-        print("Using original alert columns")
-    else:
-        # Fallback to first available columns
-        tier1_col = [col for col in available_columns if 'Tier1' in col][0] if any('Tier1' in col for col in available_columns) else None
-        tier2_col = [col for col in available_columns if 'Tier2' in col][0] if any('Tier2' in col for col in available_columns) else None
-        prob_col = [col for col in available_columns if 'Probability' in col][0] if any('Probability' in col for col in available_columns) else None
-        event_next_col = [col for col in available_columns if 'Event_Next' in col][0] if any('Event_Next' in col for col in available_columns) else None
-        print(f"Using fallback columns: {tier1_col}, {tier2_col}, {prob_col}, {event_next_col}")
-    
-    # Create alert level column
-    if tier1_col and tier2_col:
-        detailed_table['Alert_Level'] = detailed_table.apply(
-            lambda x: 'HIGH' if x[tier2_col] == 1 else 'MEDIUM' if x[tier1_col] == 1 else 'LOW',
-            axis=1
-        )
-    elif tier1_col:
-        detailed_table['Alert_Level'] = detailed_table[tier1_col].map({1: 'MEDIUM', 0: 'LOW'})
-    else:
-        detailed_table['Alert_Level'] = 'LOW'
-    
-    # Create performance evaluation
-    if tier1_col and event_next_col:
-        detailed_table['Prediction_Correct'] = detailed_table.apply(
-            lambda x: 'TRUE POSITIVE' if (x[tier1_col] == 1 and x[event_next_col] == 1) else
-                     'FALSE POSITIVE' if (x[tier1_col] == 1 and x[event_next_col] == 0) else
-                     'TRUE NEGATIVE' if (x[tier1_col] == 0 and x[event_next_col] == 0) else
-                     'FALSE NEGATIVE',
-            axis=1
-        )
-    
-    # Add probability categories
-    if prob_col:
-        detailed_table['Probability_Category'] = pd.cut(
-            detailed_table[prob_col],
-            bins=[0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
-            labels=['0-10%', '10-20%', '20-30%', '30-40%', '40-50%', 
-                   '50-60%', '60-70%', '70-80%', '80-90%', '90-100%']
-        )
-    
-    # Format date for better readability
-    detailed_table['Date_Formatted'] = detailed_table['Date'].dt.strftime('%Y-%m-%d')
-    
-    # Create summary statistics
-    summary_stats = {}
-    
-    if tier1_col:
-        summary_stats['Total_Tier1_Alerts'] = detailed_table[tier1_col].sum()
-        summary_stats['Tier1_Alert_Rate'] = detailed_table[tier1_col].mean()
-    
-    if tier2_col:
-        summary_stats['Total_Tier2_Alerts'] = detailed_table[tier2_col].sum()
-        summary_stats['Tier2_Alert_Rate'] = detailed_table[tier2_col].mean()
-    
-    if event_next_col:
-        summary_stats['Total_Events'] = detailed_table[event_next_col].sum()
-        summary_stats['Event_Rate'] = detailed_table[event_next_col].mean()
-    
-    if 'Prediction_Correct' in detailed_table.columns:
-        confusion_matrix = detailed_table['Prediction_Correct'].value_counts()
-        summary_stats.update(confusion_matrix.to_dict())
-    
-    # Select and reorder columns for final output
-    output_columns = ['Date_Formatted', 'Alert_Level']
-    
-    # Add probability column if available
-    if prob_col:
-        output_columns.append(prob_col)
-    
-    # Add tone and event columns
-    tone_event_cols = ['Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum']
-    for col in tone_event_cols:
-        if col in detailed_table.columns:
-            output_columns.append(col)
-    
-    # Add event prediction columns
-    event_cols = [event_next_col] if event_next_col else []
-    for col in event_cols:
-        if col in detailed_table.columns:
-            output_columns.append(col)
-    
-    # Add performance columns
-    if 'Prediction_Correct' in detailed_table.columns:
-        output_columns.append('Prediction_Correct')
-    
-    if 'Probability_Category' in detailed_table.columns:
-        output_columns.append('Probability_Category')
-    
-    # Include all D+7 columns if they exist
-    d7_cols = [col for col in available_columns if '7D' in col]
-    output_columns.extend(d7_cols)
-    
-    # Create final table
-    final_table = detailed_table[output_columns].copy()
-    
-    # Sort by date
-    final_table = final_table.sort_values('Date_Formatted', ascending=False)
-    
-    # Save to CSV
-    final_table.to_csv(filename, index=False)
-    
-    print(f"Alert table saved to: {filename}")
-    print(f"Total records: {len(final_table)}")
-    print(f"Columns saved: {list(final_table.columns)}")
-    
-    # Print summary
-    print(f"\nSUMMARY STATISTICS:")
-    print("-" * 40)
-    for key, value in summary_stats.items():
-        if isinstance(value, float):
-            print(f"{key}: {value:.4f}")
-        else:
-            print(f"{key}: {value}")
-    
-    # Show recent alerts in the saved file
-    print(f"\nRECENT ALERTS IN SAVED FILE:")
-    print("-" * 80)
-    recent_alerts = final_table.head(10)
-    
-    # Create a simplified view for display
-    display_columns = ['Date_Formatted', 'Alert_Level']
-    if prob_col in final_table.columns:
-        display_columns.append(prob_col)
-    if event_next_col in final_table.columns:
-        display_columns.append(event_next_col)
-    if 'Prediction_Correct' in final_table.columns:
-        display_columns.append('Prediction_Correct')
-    
-    display_table = recent_alerts[display_columns]
-    print(display_table.to_string(index=False))
-    
-    return final_table
-
-
-
-# Save the table (uncomment if you want to save)
-saved_table = save_alert_table(alert_table)
-
-print(f"\n" + "="*70)
-print("ALERT TABLE COMPLETE")
-print("="*70)
-print("The table shows daily predictions and alerts based on your thresholds.")
-print("Use this for operational monitoring and decision-making.")
-exit()
-def produce_next_day_alerts(df):
-    """Produce alerts for the next day based on current tone data"""
-    
-    print("="*70)
-    print("NEXT DAY ALERTS - Daily Prediction System")
-    print("="*70)
-    
-    # Clean and prepare data
-    clean_data = df.dropna(subset=['Daily_AvgTone', 'event_count']).copy()
-    clean_data['Date'] = pd.to_datetime(clean_data['Date'])
-    clean_data = clean_data.sort_values('Date')
-    
-    # Aggregate daily data
-    daily_aggregated = clean_data.groupby('Date').agg({
-        'Daily_AvgTone': 'sum',
-        'event_count': 'sum'
-    }).reset_index()
-    
-    daily_aggregated.columns = ['Date', 'Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum']
-    
-    # Create complete dataset
-    all_dates = pd.date_range(start=clean_data['Date'].min(), end=clean_data['Date'].max(), freq='D')
-    daily_global = pd.DataFrame({'Date': all_dates})
-    daily_global = daily_global.merge(daily_aggregated, on='Date', how='left')
-    daily_global[['Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum']] = daily_global[['Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum']].fillna(0)
-    daily_global['Event_Occurred'] = (daily_global['Global_Event_Count_Sum'] > 0).astype(int)
-    
-    # Feature engineering for next day prediction
-    predictive_data = daily_global.copy().sort_values('Date')
-    
-    # Calculate features needed for prediction
-    predictive_data['Tone_MA_3'] = predictive_data['Global_Daily_AvgTone_Sum'].rolling(3).mean()
-    predictive_data['Tone_MA_7'] = predictive_data['Global_Daily_AvgTone_Sum'].rolling(7).mean()
-    predictive_data['Tone_Std_7'] = predictive_data['Global_Daily_AvgTone_Sum'].rolling(7).std()
-    
-    # Lagged tone features
-    for lag in [1, 2, 3]:
-        predictive_data[f'Tone_Lag_{lag}'] = predictive_data['Global_Daily_AvgTone_Sum'].shift(lag)
-    
-    # Event history
-    predictive_data['Event_Lag_1'] = predictive_data['Event_Occurred'].shift(1)
-    predictive_data['Event_Lag_3'] = predictive_data['Event_Occurred'].shift(3)
-    
-    # Target: event tomorrow
-    predictive_data['Event_Tomorrow'] = predictive_data['Event_Occurred'].shift(-1)
-    
-    # Remove rows with missing data
-    feature_cols = ['Global_Daily_AvgTone_Sum', 'Tone_MA_3', 'Tone_MA_7', 'Tone_Std_7',
-                   'Tone_Lag_1', 'Tone_Lag_2', 'Tone_Lag_3', 'Event_Lag_1', 'Event_Lag_3']
-    
-    predictive_data_clean = predictive_data.dropna(subset=feature_cols + ['Event_Tomorrow'])
-    
-    # Train model on all available data
-    from sklearn.ensemble import RandomForestClassifier
-    
-    X = predictive_data_clean[feature_cols]
-    y = predictive_data_clean['Event_Tomorrow']
-    
-    model = RandomForestClassifier(n_estimators=100, class_weight='balanced', random_state=42)
-    model.fit(X, y)
-    
-    # Get predictions for ALL days
-    all_predictions = model.predict_proba(X)[:, 1]
-    predictive_data_clean['Prediction_Probability'] = all_predictions
-    
-    # Apply thresholds
-    tier1_threshold = 0.3
-    tier2_threshold = 0.5
-    
-    predictive_data_clean['Tier1_Alert'] = (predictive_data_clean['Prediction_Probability'] >= tier1_threshold).astype(int)
-    predictive_data_clean['Tier2_Alert'] = (predictive_data_clean['Prediction_Probability'] >= tier2_threshold).astype(int)
-    
-    # Create the alert table
-    alert_table = predictive_data_clean[[
-        'Date', 'Global_Daily_AvgTone_Sum', 'Global_Event_Count_Sum', 
-        'Event_Occurred', 'Event_Tomorrow', 'Prediction_Probability',
-        'Tier1_Alert', 'Tier2_Alert'
-    ]].copy()
-    
-    # Add alert descriptions
-    alert_table['Tier1_Alert_Text'] = alert_table['Tier1_Alert'].map({1: 'ALERT', 0: 'No Alert'})
-    alert_table['Tier2_Alert_Text'] = alert_table['Tier2_Alert'].map({1: 'HIGH ALERT', 0: 'No Alert'})
-    
-    # Add whether prediction was correct
-    alert_table['Correct_Prediction'] = (
-        ((alert_table['Tier1_Alert'] == 1) & (alert_table['Event_Tomorrow'] == 1)) |
-        ((alert_table['Tier1_Alert'] == 0) & (alert_table['Event_Tomorrow'] == 0))
-    ).astype(int)
-    
-    # Print summary
-    print(f"\nALERT SYSTEM SUMMARY:")
-    print("-" * 40)
-    print(f"Total days analyzed: {len(alert_table)}")
-    print(f"Days with events tomorrow: {alert_table['Event_Tomorrow'].sum()} ({alert_table['Event_Tomorrow'].mean()*100:.1f}%)")
-    print(f"Tier 1 Alerts: {alert_table['Tier1_Alert'].sum()} ({alert_table['Tier1_Alert'].mean()*100:.1f}%)")
-    print(f"Tier 2 Alerts: {alert_table['Tier2_Alert'].sum()} ({alert_table['Tier2_Alert'].mean()*100:.1f}%)")
-    print(f"Overall accuracy: {alert_table['Correct_Prediction'].mean()*100:.1f}%")
-    
-    # Show recent alerts (last 30 days)
-    recent_alerts = alert_table.tail(30).copy()
-    
-    print(f"\nRECENT NEXT-DAY ALERTS (Last 30 days):")
-    print("-" * 110)
-    print(f"{'Date':<12} | {'Tone':<8} | {'Prob':<6} | {'Tier1':<8} | {'Tier2':<10} | {'Event Tomorrow':<15} | {'Correct':<8}")
-    print("-" * 110)
-    
-    for _, row in recent_alerts.iterrows():
-        date_str = row['Date'].strftime('%Y-%m-%d')
-        tone = row['Global_Daily_AvgTone_Sum']
-        prob = row['Prediction_Probability']
-        tier1 = row['Tier1_Alert_Text']
-        tier2 = row['Tier2_Alert_Text']
-        event_tomorrow = "EVENT" if row['Event_Tomorrow'] else "No Event"
-        correct = "✓" if row['Correct_Prediction'] else "✗"
-        
-        print(f"{date_str} | {tone:>7.2f} | {prob:>5.3f} | {tier1:>8} | {tier2:>10} | {event_tomorrow:>15} | {correct:>8}")
-    
-    # Show highest probability alerts
-    high_prob_alerts = alert_table.nlargest(20, 'Prediction_Probability')[['Date', 'Global_Daily_AvgTone_Sum', 'Prediction_Probability', 'Event_Tomorrow']]
-    
-    print(f"\nTOP 20 HIGHEST PROBABILITY ALERTS:")
-    print("-" * 70)
-    print(f"{'Date':<12} | {'Tone':<8} | {'Probability':<12} | {'Event Tomorrow':<15}")
-    print("-" * 70)
-    
-    for _, row in high_prob_alerts.iterrows():
-        date_str = row['Date'].strftime('%Y-%m-%d')
-        tone = row['Global_Daily_AvgTone_Sum']
-        prob = row['Prediction_Probability']
-        event_tomorrow = "✓ EVENT" if row['Event_Tomorrow'] else "✗ No Event"
-        
-        print(f"{date_str} | {tone:>7.2f} | {prob:>11.3f} | {event_tomorrow:>15}")
-    
-    # Performance by threshold
-    print(f"\nPERFORMANCE BY THRESHOLD LEVEL:")
-    print("-" * 60)
-    print(f"{'Threshold':<10} | {'Alerts':<8} | {'Precision':<10} | {'Recall':<8} | {'F1':<6}")
-    print("-" * 60)
-    
-    thresholds = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
-    for threshold in thresholds:
-        alerts = (alert_table['Prediction_Probability'] >= threshold).astype(int)
-        true_positives = ((alerts == 1) & (alert_table['Event_Tomorrow'] == 1)).sum()
-        false_positives = ((alerts == 1) & (alert_table['Event_Tomorrow'] == 0)).sum()
-        false_negatives = ((alerts == 0) & (alert_table['Event_Tomorrow'] == 1)).sum()
-        
-        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
-        recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
-        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-        
-        print(f"{threshold:>9.1f} | {alerts.sum():>7} | {precision:>9.3f} | {recall:>7.3f} | {f1:>5.3f}")
-    
-    return alert_table, model, feature_cols
-
-# Run the next-day alert system
-alert_table, trained_model, features_used = produce_next_day_alerts(df)
-
-# Function to get today's prediction
-def get_todays_prediction(current_tone_data, model, feature_names):
-    """
-    Get prediction for today based on current tone data
-    current_tone_data should be a dictionary with today's features
-    """
-    # Create feature vector in the right order
-    feature_vector = [current_tone_data[feature] for feature in feature_names]
-    
-    # Get prediction probability
-    probability = model.predict_proba([feature_vector])[0, 1]
-    
-    # Apply thresholds
-    tier1_alert = probability >= 0.3
-    tier2_alert = probability >= 0.5
-    
-    # Determine alert level and recommendation
-    if tier2_alert:
-        alert_level = "HIGH ALERT"
-        recommendation = "Consider preventive measures - high probability of events tomorrow"
-    elif tier1_alert:
-        alert_level = "MEDIUM ALERT" 
-        recommendation = "Increase monitoring - moderate probability of events tomorrow"
-    else:
-        alert_level = "LOW RISK"
-        recommendation = "Normal monitoring - low probability of events tomorrow"
-    
-    return {
-        'prediction_probability': probability,
-        'alert_level': alert_level,
-        'tier1_alert': tier1_alert,
-        'tier2_alert': tier2_alert,
-        'recommendation': recommendation
-    }
-
-# Example: How to use for today's prediction
-print(f"\n" + "="*70)
-print("HOW TO USE FOR TODAY'S PREDICTION")
-print("="*70)
-
-# Example current data (you would replace with real current data)
-example_current_data = {
-    'Global_Daily_AvgTone_Sum': -0.25,
-    'Tone_MA_3': -0.22,
-    'Tone_MA_7': -0.20,
-    'Tone_Std_7': 0.06,
-    'Tone_Lag_1': -0.18,
-    'Tone_Lag_2': -0.15,
-    'Tone_Lag_3': -0.12,
-    'Event_Lag_1': 0,
-    'Event_Lag_3': 1
+# trainer dict compatibility
+trainer = {
+    "daily": daily,
+    "daily_model": daily_model,
+    "train_df": train_df,
+    "test_df": test_df,
+    "feature_cols": feature_cols,
+    "trained_models": trained_models,
+    "results_summary": results_summary_rows,
 }
 
-today_prediction = get_todays_prediction(example_current_data, trained_model, features_used)
+# -------------------------
+# APPLY MODELS & PRODUCE ALERTS (post-train)
+# -------------------------
+if APPLY_TO == "test":
+    apply_mask = daily["Date"] > train_end_dt
+else:
+    apply_mask = pd.Series(True, index=daily.index)
 
-print(f"Example Prediction for Today:")
-print(f"Current Tone: {example_current_data['Global_Daily_AvgTone_Sum']}")
-print(f"Prediction Probability: {today_prediction['prediction_probability']:.3f}")
-print(f"Alert Level: {today_prediction['alert_level']}")
-print(f"Recommendation: {today_prediction['recommendation']}")
+apply_df = daily.loc[apply_mask].copy().sort_values("Date").reset_index(drop=True)
+apply_df = apply_df.dropna(subset=feature_cols).copy()
 
-# Show what the system would predict for the most recent day
-most_recent = alert_table.iloc[-1]
-print(f"\nMOST RECENT PREDICTION IN DATA:")
-print(f"Date: {most_recent['Date'].strftime('%Y-%m-%d')}")
-print(f"Tone: {most_recent['Global_Daily_AvgTone_Sum']:.2f}")
-print(f"Probability: {most_recent['Prediction_Probability']:.3f}")
-print(f"Tier 1 Alert: {most_recent['Tier1_Alert_Text']}")
-print(f"Tier 2 Alert: {most_recent['Tier2_Alert_Text']}")
-print(f"Actual Event Tomorrow: {'EVENT' if most_recent['Event_Tomorrow'] else 'No Event'}")
+apply_df["Prob_1D"] = np.nan
+apply_df["Prob_3D"] = np.nan
+apply_df["Prob_7D"] = np.nan
 
-print(f"\n" + "="*70)
-print("NEXT-DAY ALERT SYSTEM READY")
-print("=" + "="*70)
-print("Use get_todays_prediction() with current tone data to get tomorrow's forecast")
-print(f"Features needed: {features_used}")
+
+def _apply_trained(trained_obj, model_name, X):
+    if trained_obj is None:
+        return np.zeros(len(X))
+    if model_name == "Logistic Regression":
+        _, scaler, lr_model = trained_obj
+        Xs = scaler.transform(X)
+        return lr_model.predict_proba(Xs)[:, 1]
+    elif model_name == "XGBoost":
+        return trained_obj.predict_proba(X.values)[:, 1]
+    else:
+        return trained_obj.predict_proba(X)[:, 1]
+
+
+for horizon, prob_col in [("1-day", "Prob_1D"), ("3-day", "Prob_3D"), ("7-day", "Prob_7D")]:
+    models_here = trained_models.get(horizon, {})
+    chosen = None
+    chosen_name = None
+    if MODEL_ALGO_PREFERENCE in models_here:
+        chosen_name = MODEL_ALGO_PREFERENCE
+        chosen = models_here[chosen_name]
+    elif len(models_here) > 0:
+        chosen_name = list(models_here.keys())[0]
+        chosen = models_here[chosen_name]
+    if chosen is None:
+        continue
+    apply_df[prob_col] = _apply_trained(chosen, chosen_name, apply_df[feature_cols])
+
+tier1 = TIER_THRESHOLD
+tier2 = TIER_THRESHOLD  # single tier
+
+apply_df["Tier1_Alert_1D"] = (apply_df["Prob_1D"] >= tier1).astype(int)
+apply_df["Tier2_Alert_1D"] = (apply_df["Prob_1D"] >= tier2).astype(int)
+apply_df["Tier1_Alert_3D"] = (apply_df["Prob_3D"] >= tier1).astype(int)
+apply_df["Tier2_Alert_3D"] = (apply_df["Prob_3D"] >= tier2).astype(int)
+apply_df["Tier1_Alert_7D"] = (apply_df["Prob_7D"] >= tier1).astype(int)
+apply_df["Tier2_Alert_7D"] = (apply_df["Prob_7D"] >= tier2).astype(int)
+
+# Merge apply_df with test_df to ensure summaries are computed only on test data
+# We'll merge on Date and keep only rows present in test_df (post-train test set)
+merged = apply_df.merge(test_df[["Date", "Event_Next_1D", "Event_Next_3D", "Event_Next_7D"]], on="Date", how="inner", suffixes=("", "_true"))
+
+# If merged is empty, the test set had no rows after train_end (we handle gracefully)
+if merged.empty:
+    print("Warning: No rows in merged predictions vs test labels (no post-train rows). Metrics will be empty.")
+
+# Add TN columns explicitly for verification per horizon (using Tier1 decisions)
+merged["TN_1D"] = ((merged["Tier1_Alert_1D"] == 0) & (merged["Event_Next_1D"] == 0)).astype(int)
+merged["TN_3D"] = ((merged["Tier1_Alert_3D"] == 0) & (merged["Event_Next_3D"] == 0)).astype(int)
+merged["TN_7D"] = ((merged["Tier1_Alert_7D"] == 0) & (merged["Event_Next_7D"] == 0)).astype(int)
+
+# Also compute TP/FP/FN in merged (redundant but clearer)
+merged["TP_1D"] = ((merged["Tier1_Alert_1D"] == 1) & (merged["Event_Next_1D"] == 1)).astype(int)
+merged["FP_1D"] = ((merged["Tier1_Alert_1D"] == 1) & (merged["Event_Next_1D"] == 0)).astype(int)
+merged["FN_1D"] = ((merged["Tier1_Alert_1D"] == 0) & (merged["Event_Next_1D"] == 1)).astype(int)
+
+merged["TP_3D"] = ((merged["Tier1_Alert_3D"] == 1) & (merged["Event_Next_3D"] == 1)).astype(int)
+merged["FP_3D"] = ((merged["Tier1_Alert_3D"] == 1) & (merged["Event_Next_3D"] == 0)).astype(int)
+merged["FN_3D"] = ((merged["Tier1_Alert_3D"] == 0) & (merged["Event_Next_3D"] == 1)).astype(int)
+
+merged["TP_7D"] = ((merged["Tier1_Alert_7D"] == 1) & (merged["Event_Next_7D"] == 1)).astype(int)
+merged["FP_7D"] = ((merged["Tier1_Alert_7D"] == 1) & (merged["Event_Next_7D"] == 0)).astype(int)
+merged["FN_7D"] = ((merged["Tier1_Alert_7D"] == 0) & (merged["Event_Next_7D"] == 1)).astype(int)
+
+# -------------------------
+# ANTICIPATION COLUMNS: mark whether an event was anticipated by at least 1 Tier1 alert
+# -------------------------
+# We'll construct a prediction-alert lookup (preds) covering the test prediction rows only (dates in merged)
+preds = apply_df[["Date", "Tier1_Alert_1D", "Tier1_Alert_3D", "Tier1_Alert_7D"]].copy().set_index("Date").sort_index()
+
+# For 1D: event_date = prediction Date + 1; an event is anticipated if the same prediction row had Tier1_Alert_1D==1
+merged["Anticipated_1D"] = merged.apply(
+    lambda r: bool(r["Tier1_Alert_1D"] == 1) if r.get("Event_Next_1D", 0) == 1 else False, axis=1
+)
+
+# For 3D and 7D: conservative check using earliest possible event day = prediction Date + 1.
+# If any Tier1 alert of corresponding horizon exists in the lookback window [event_day - lookback, event_day - 1],
+# we mark the event as anticipated. The lookback equals the horizon window length (3 or 7).
+def any_prior_alert_for_event(event_date, lookback_days, alert_col, preds_indexed):
+    start = (pd.to_datetime(event_date) - pd.Timedelta(days=lookback_days)).normalize()
+    end = (pd.to_datetime(event_date) - pd.Timedelta(days=1)).normalize()
+    if end < start:
+        return False
+    try:
+        window = preds_indexed.loc[start:end]
+    except KeyError:
+        return False
+    if window.empty:
+        return False
+    return bool((window[alert_col] == 1).any())
+
+# Add earliest possible event dates for merged rows
+merged["EventDate_earliest"] = pd.to_datetime(merged["Date"]) + pd.Timedelta(days=1)
+
+# Anticipated_3D: check lookback 3 days for Tier1_Alert_3D
+merged["Anticipated_3D"] = merged.apply(
+    lambda r: any_prior_alert_for_event(r["EventDate_earliest"], lookback_days=3, alert_col="Tier1_Alert_3D", preds_indexed=preds)
+    if r.get("Event_Next_3D", 0) == 1
+    else False,
+    axis=1,
+)
+
+# Anticipated_7D: check lookback 7 days for Tier1_Alert_7D
+merged["Anticipated_7D"] = merged.apply(
+    lambda r: any_prior_alert_for_event(r["EventDate_earliest"], lookback_days=7, alert_col="Tier1_Alert_7D", preds_indexed=preds)
+    if r.get("Event_Next_7D", 0) == 1
+    else False,
+    axis=1,
+)
+
+# drop helper column
+merged.drop(columns=["EventDate_earliest"], inplace=True)
+
+# -------------------------
+# Persist merged alert table (test-only) with TN/TP/FP/FN and Anticipated_* columns
+# -------------------------
+timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+alert_csv = os.path.join(alerts_dir, f"next_day_alerts_posttrain_{TRAIN_END.replace('-','')}_{timestamp}.csv")
+_save_csv(merged, alert_csv)
+
+# -------------------------
+# METRICS: compute on merged (i.e., test-only)
+# -------------------------
+def calculate_alert_efficiency_on_df(df_local, prob_col, true_col, threshold=0.3, cost_per_missed_event=10000, cost_per_false_alert=100):
+    total_days = len(df_local)
+    if total_days == 0:
+        return {"TP": 0, "FP": 0, "FN": 0, "TN": 0, "total_days": 0, "precision": None, "recall": None, "f1_score": None, "alert_rate": None, "false_alert_ratio": None, "missed_event_cost": None, "false_alert_cost": None}
+    preds = (df_local[prob_col] >= threshold).astype(int)
+    truth = df_local[true_col].astype(int)
+    TP = int(((preds == 1) & (truth == 1)).sum())
+    FP = int(((preds == 1) & (truth == 0)).sum())
+    FN = int(((preds == 0) & (truth == 1)).sum())
+    TN = int(((preds == 0) & (truth == 0)).sum())
+    precision = TP / (TP + FP) if (TP + FP) > 0 else 0.0
+    recall = TP / (TP + FN) if (TP + FN) > 0 else 0.0
+    f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+    alert_rate = (TP + FP) / total_days
+    false_alert_ratio = FP / (TP + FP) if (TP + FP) > 0 else 0.0
+    missed_event_cost = FN * cost_per_missed_event
+    false_alert_cost = FP * cost_per_false_alert
+    return {"TP": TP, "FP": FP, "FN": FN, "TN": TN, "total_days": total_days, "precision": precision, "recall": recall, "f1_score": f1_score, "alert_rate": alert_rate, "false_alert_ratio": false_alert_ratio, "missed_event_cost": missed_event_cost, "false_alert_cost": false_alert_cost}
+
+def business_efficiency(metrics_dict, benefit_of_catching_event=50000, cost_of_response=2000, response_cost=2000, opportunity_cost=500, alert_fatigue_cost=100, cost_per_FN=50000, system_maintenance_cost=10000):
+    TP = metrics_dict.get("TP", 0)
+    FP = metrics_dict.get("FP", 0)
+    FN = metrics_dict.get("FN", 0)
+    value_per_TP = (benefit_of_catching_event - cost_of_response)
+    cost_per_FP = (response_cost + opportunity_cost + alert_fatigue_cost)
+    net_value = (TP * value_per_TP) - (FP * cost_per_FP) - (FN * cost_per_FN)
+    denom = (FP * cost_per_FP + system_maintenance_cost)
+    ROI = (TP * value_per_TP) / denom if denom > 0 else None
+    return {"value_per_TP": value_per_TP, "cost_per_FP": cost_per_FP, "net_value": net_value, "ROI": ROI}
+
+# Compute per-horizon metrics on merged (test-only)
+metrics_summaries = {}
+horizon_map = {
+    "1-day": ("Prob_1D", "Event_Next_1D"),
+    "3-day": ("Prob_3D", "Event_Next_3D"),
+    "7-day": ("Prob_7D", "Event_Next_7D"),
+}
+for horizon, (prob_col, true_col) in horizon_map.items():
+    if prob_col not in merged.columns or true_col not in merged.columns:
+        metrics_summaries[horizon] = {"error": f"missing {prob_col} or {true_col} in merged test dataset"}
+        continue
+    eff = calculate_alert_efficiency_on_df(merged, prob_col, true_col, threshold=tier1, cost_per_missed_event=COST_PER_MISSED_EVENT, cost_per_false_alert=COST_PER_FALSE_ALERT)
+    biz = business_efficiency(eff, benefit_of_catching_event=BENEFIT_OF_CATCHING_EVENT, cost_of_response=COST_OF_RESPONSE, response_cost=COST_OF_RESPONSE, opportunity_cost=500, alert_fatigue_cost=100, cost_per_FN=COST_PER_MISSED_EVENT, system_maintenance_cost=SYSTEM_MAINTENANCE_COST)
+    metrics_summaries[horizon] = {"efficiency": eff, "business": biz}
+
+# Persist metrics summary CSV (one row per horizon)
+timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+metrics_rows = []
+for horizon, d in metrics_summaries.items():
+    eff = d.get("efficiency", {})
+    biz = d.get("business", {})
+    row = {
+        "horizon": horizon,
+        "TP": eff.get("TP"),
+        "FP": eff.get("FP"),
+        "FN": eff.get("FN"),
+        "TN": eff.get("TN"),
+        "total_days": eff.get("total_days"),
+        "precision": eff.get("precision"),
+        "recall": eff.get("recall"),
+        "f1": eff.get("f1_score"),
+        "alert_rate": eff.get("alert_rate"),
+        "false_alert_ratio": eff.get("false_alert_ratio"),
+        "missed_event_cost": eff.get("missed_event_cost"),
+        "false_alert_cost": eff.get("false_alert_cost"),
+        "net_value": biz.get("net_value"),
+        "ROI": biz.get("ROI"),
+    }
+    metrics_rows.append(row)
+metrics_df = pd.DataFrame(metrics_rows)
+metrics_csv = os.path.join(alerts_dir, f"alert_metrics_summary_testonly_{TRAIN_END.replace('-','')}_{timestamp}.csv")
+_save_csv(metrics_df, metrics_csv)
+_save_pickle(metrics_summaries, os.path.join(alerts_dir, f"alert_metrics_summary_testonly_{TRAIN_END.replace('-','')}_{timestamp}.pkl"))
+
+# Persist verification summary (TP/FP/FN/TN) per horizon (test-only)
+verif_summary = {
+    "1-day": {"tp": int(merged["TP_1D"].sum()), "fp": int(merged["FP_1D"].sum()), "fn": int(merged["FN_1D"].sum()), "tn": int(merged["TN_1D"].sum())},
+    "3-day": {"tp": int(merged["TP_3D"].sum()), "fp": int(merged["FP_3D"].sum()), "fn": int(merged["FN_3D"].sum()), "tn": int(merged["TN_3D"].sum())},
+    "7-day": {"tp": int(merged["TP_7D"].sum()), "fp": int(merged["FP_7D"].sum()), "fn": int(merged["FN_7D"].sum()), "tn": int(merged["TN_7D"].sum())},
+}
+_save_pickle(verif_summary, os.path.join(models_dir, f"verification_summary_testonly_{TRAIN_END.replace('-','')}_{timestamp}.pkl"))
+
+# -------------------------
+# DIAGNOSTICS (print)
+# -------------------------
+print("Artifacts saved to:", OUT_DIR)
+print(" - Train CSV:", train_csv)
+print(" - Test CSV:", test_csv)
+print(" - Results summary CSV:", results_csv)
+print(" - Alert CSV (test-only rows):", alert_csv)
+print(" - Metrics CSV (test-only):", metrics_csv)
+print("Trained models saved in:", models_dir)
+
+print("\nMODEL AVAILABILITY:")
+for h, models in trained_models.items():
+    print("Horizon:", h, "->", list(models.keys()))
+
+if len(test_df) > 0:
+    X_test = test_df[feature_cols]
+    print("\nPROBABILITY DISTRIBUTIONS ON TEST SET:")
+    for h, models in trained_models.items():
+        for name, obj in models.items():
+            if name == "Logistic Regression":
+                scaler = obj[1]
+                clf = obj[2]
+                probs = clf.predict_proba(scaler.transform(X_test))[:, 1]
+            elif name == "XGBoost":
+                probs = obj.predict_proba(X_test.values)[:, 1]
+            else:
+                probs = obj.predict_proba(X_test)[:, 1]
+            print(f"{h} / {name}: min={probs.min():.6f} mean={probs.mean():.6f} max={probs.max():.6f} unique={len(np.unique(np.round(probs,6)))}")
+
+print("\nTEST-ONLY verification summary (TP/FP/FN/TN):")
+print(verif_summary)
+
+# End of script.

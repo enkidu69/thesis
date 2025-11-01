@@ -36,7 +36,7 @@ FIPS_TO_ISO2 = {'AF': 'AFGHANISTAN','AL': 'ALBANIA','AG': 'ALGERIA','AQ': 'AMERI
 # Global variable to track interruption
 interrupted = False
 
-syear=2020
+syear=2018
 year=syear
 #start_month=1 
 #start_day=1
@@ -130,11 +130,11 @@ def download_gdelt_data_direct():
     temp_dir = 'temp_data_direct'
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
-    syear=2020
+    syear=2018
     start_month=1
     start_day=1
     eyear=2025
-    end_month=9
+    end_month=10
     end_day=30
     start_date = datetime(syear, start_month, start_day)
     end_date = datetime(eyear, end_month, end_day)
@@ -232,7 +232,7 @@ def main():
     
     # Fixed parameters
     YEAR = syear  # Using 2024 for actual data
-    FOCAL_COUNTRIES = ['UK']  # Countries we're analyzing
+    FOCAL_COUNTRIES = ['FR']  # Countries we're analyzing
 #############################################################################################COUNTRY
     EVENT_ROOTCODES= ['10','11','12','13','14','15','16','17','18','19','20']
     # Event codes to filter for (political/diplomatic events)
@@ -246,8 +246,8 @@ def main():
     print("\nSTEP 2: Selecting counterpart countries...")
 
     # Default selection
-    #default_counterparts = ['RS','IZ','IS','US', 'FR', 'UK', 'IT','SP','IR', 'AG', 'AJ', 'AM','BG', 'CH', 'GZ', 'HK', 'IN', 'ID', 'KN', 'KZ', 'LY','MD','MY', 'NU', 'PK', 'SA', 'SU', 'SY','TU', 'UZ', 'VE', 'WE', 'YM', 'XX']
-    default_counterparts = ['RS']
+    default_counterparts = ['RS','IZ','IS','US', 'FR', 'UK', 'IT','SP','IR', 'AG', 'AJ', 'AM','BG', 'CH', 'GZ', 'HK', 'IN', 'ID', 'KN', 'KZ', 'LY','MD','MY', 'NU', 'PK', 'SA', 'SU', 'SY','TU', 'UZ', 'VE', 'WE', 'YM', 'XX']
+    #default_counterparts = ['RS']
     
     #default_counterparts = ['AF','AL','AG','AQ','AN','AO','AV','AY','AC','AR','AM','AA','AT','AS','AU','AJ','BF','BA','FQ','BG','BB','BS','BO','BE','BH','BN','BD','BT','BL','BK','BC','BV','BR','IO','VI','BX','BU','UV','BM','BY','CB','CM','CA','CV','CJ','CT','CD','CI','CH','KT','IP','CK','CO','CN','CF','CW','CR','CS','IV','HR','CU','CY','EZ','DA','DJ','DO','DR','EC','EG','ES','EK','ER','EN','ET','EU','FK','FO','FM','FJ','FI','FR','FG','FP','FS','GB','GA','GZ','GG','GM','GH','GI','GO','GR','GL','GJ','GP','GQ','GT','GK','GV','PU','GY','HA','HM','HO','HK','HQ','HU','IC','IN','ID','IR','IZ','EI','IS','IT','JM','JN','JA','DQ','JE','JQ','JO','JU','KZ','KE','KQ','KR','KN','KS','KU','KG','LA','LG','LE','LT','LI','LY','LS','LH','LU','MC','MK','MA','MI','MY','MV','ML','MT','IM','RM','MB','MR','MP','MF','MX','MQ','MD','MN','MG','MW','MH','MO','MZ','WA','NR','BQ','NP','NL','NT','NC','NZ','NU','NG','NI','NE','NF','CQ','NO','MU','PK','LQ','PM','PP','PF','PA','PE','RP','PC','PL','PO','RQ','QA','RE','RO','RS','RW','SC','SH','ST','SB','VC','SM','TP','SA','SG','SR','SE','SL','SN','LO','SI','BP','SO','SF','SX','SP','PG','CE','SU','NS','SV','WZ','SW','SZ','SY','TI','TZ','TH','TO','TL','TN','TD','TE','PS','TS','TU','TX','TK','TV','UG','UP','TC','UK','UK','UK','UK','US','UY','UZ','NH','VT','VE','VM','VQ','WQ','WF','WE','WI','WS','YM','CG','ZA','ZI','TW']
 
@@ -354,11 +354,13 @@ def main():
                     #print(df_filtered)
                     #df_filtered=df_filtered[df_filtered["EventCode"].astype(str).isin(EVENT_CODES)]
                     #print("EVENT CODES USED")
+                    #root="events"
                     #rootcode filter
-                    df_filtered=df_filtered[df_filtered["EventRootCode"].astype(str).isin(EVENT_ROOTCODES)]
-                    print("ROOT CODES USED")
+                    #df_filtered=df_filtered[df_filtered["EventRootCode"].astype(str).isin(EVENT_ROOTCODES)]
+                    #print("ROOT CODES USED")
+                    #root="root"
                     #df_filtered=df_filtered[df_filtered['Actor2Geo_CountryCode'].replace("", focal_country)]
-
+                    root="all"
 
                     #print(len(df_filtered))
                     if len(df_filtered) > 0:
@@ -440,9 +442,11 @@ def main():
         before_filter = len(combined_df)
 #######COUNTERPARTFILTER#################################ignored counterpart filter###################################################################################################################################
         #combined_df = combined_df[counterpart_filter].copy()
+        #cps="counterparts"
         #print("COUNTERPART FILTER")
         
         print("NO COUNTERPART FILTER  -ALL COUNTRIES USED")
+        cps="all"
         
         print(f"✓ Filtered to {len(combined_df):,} events (from {before_filter:,})")
         
@@ -658,6 +662,7 @@ def main():
     aggregated_df.loc[aggregated_df["actor_country_fips"] == "CN", "actor_country_fips"] = "CH"
     aggregated_df.loc[aggregated_df["actor_country_fips"] == "RU", "actor_country_fips"] = "RS"
     aggregated_df.loc[aggregated_df["actor_country_fips"] == "NG", "actor_country_fips"] = "NI"
+    aggregated_df.loc[aggregated_df["actor_country_fips"] == "CO", "actor_country_fips"] = "CS"
     #filter focal countries
     attacksfilter1=False
     attacksfilter2=False
@@ -719,7 +724,7 @@ def main():
     
     print(f"Merged dataset shape: {merged.shape}")
     print(f"Daily scores records: {len(daily_scores)}")
-    mergedname=f'aggregated_cyber_events_{YEAR}_{random_str}.xlsx'
+    mergedname=f'aggregated_cyber_events_{YEAR}_{focal_country}_{root}_{cps}_{random_str}.xlsx'
     #print(f"Merged records with cyber events: {merged_df[merged_df['event_count'].notna()].shape[0]}")
     daily_scores.to_excel(mergedname, index=False)
     #dailyscores OK
