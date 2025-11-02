@@ -91,6 +91,9 @@ concatenated_df=read_and_concatenate_excel_files()
 print(f"Successfully concatenated {len(concatenated_df['source_file'].unique())} files")
 print(f"Final DataFrame shape: {concatenated_df.shape}")
 df=concatenated_df
+
+
+
 """
 Standalone script to train alert models (using 28-day moving average) and produce
 D+1, D+3, D+7 alerts + verification and metrics. Flattened runtime version (no user functions).
@@ -213,11 +216,15 @@ if "Date" not in df.columns:
 df["Date"] = pd.to_datetime(df["Date"])
 df = df.sort_values("Date").reset_index(drop=True)
 
+
+
+
 attacks = attacks.copy()
 if "event_date" not in attacks.columns:
     raise RuntimeError("Attacks DataFrame must contain an 'event_date' column")
 attacks["event_date"] = pd.to_datetime(attacks["event_date"])
 attacks = attacks.sort_values("event_date").reset_index(drop=True)
+
 
 # Aggregate
 tone_daily = df.groupby("Date", as_index=False).agg({"Daily_AvgTone": "mean"})
@@ -225,15 +232,30 @@ attacks_daily = attacks.groupby("event_date", as_index=False).agg({"event_count"
     columns={"event_date": "Date"}
 )
 
+
+
+
 # Continuous date index
 start_date = min(tone_daily["Date"].min(), attacks_daily["Date"].min())
 end_date = max(tone_daily["Date"].max(), attacks_daily["Date"].max())
 all_dates = pd.date_range(start=start_date, end=end_date, freq="D")
 daily = pd.DataFrame({"Date": all_dates})
 
+
+#daily checked
+#attacks checked here: OK
+
+
 # Merge; fill event counts with 0; keep tone NaNs (do not fill before rolling)
-daily = daily.merge(tone_daily.rename(columns={"Daily_AvgTone": "Global_Daily_AvgTone_Sum"}), on="Date", how="left")
-daily = daily.merge(attacks_daily.rename(columns={"event_count": "Global_Event_Count_Sum"}), on="Date", how="left")
+daily = daily.merge(tone_daily.rename(columns={"Daily_AvgTone": "Global_Daily_AvgTone_Sum"}), on="Date", how="outer")
+
+
+
+
+daily = daily.merge(attacks_daily.rename(columns={"event_count": "Global_Event_Count_Sum"}), on="Date", how="outer")
+
+
+
 daily["Global_Event_Count_Sum"] = daily["Global_Event_Count_Sum"].fillna(0)
 daily["Event_Occurred"] = (daily["Global_Event_Count_Sum"] > 0).astype(int)
 
@@ -424,6 +446,12 @@ else:
     apply_mask = pd.Series(True, index=daily.index)
 
 apply_df = daily.loc[apply_mask].copy().sort_values("Date").reset_index(drop=True)
+#NL missing one day due to missing data at the end of JUNE 2025!!!
+
+#apply_df.to_excel('dailyaft.xlsx', index=False, engine="xlsxwriter", engine_kwargs={'options': {'strings_to_urls': False}})
+
+#exit()
+
 apply_df = apply_df.dropna(subset=feature_cols).copy()
 
 apply_df["Prob_1D"] = np.nan
@@ -470,6 +498,9 @@ apply_df["Tier2_Alert_7D"] = (apply_df["Prob_7D"] >= tier2).astype(int)
 
 # Merge apply_df with test_df to ensure summaries are computed only on test data
 # We'll merge on Date and keep only rows present in test_df (post-train test set)
+
+
+
 merged = apply_df.merge(test_df[["Date", "Event_Next_1D", "Event_Next_3D", "Event_Next_7D"]], on="Date", how="inner", suffixes=("", "_true"))
 
 # If merged is empty, the test set had no rows after train_end (we handle gracefully)
@@ -504,6 +535,10 @@ preds = apply_df[["Date", "Tier1_Alert_1D", "Tier1_Alert_3D", "Tier1_Alert_7D"]]
 merged["Anticipated_1D"] = merged.apply(
     lambda r: bool(r["Tier1_Alert_1D"] == 1) if r.get("Event_Next_1D", 0) == 1 else False, axis=1
 )
+
+
+
+
 
 # For 3D and 7D: conservative check using earliest possible event day = prediction Date + 1.
 # If any Tier1 alert of corresponding horizon exists in the lookback window [event_day - lookback, event_day - 1],
