@@ -73,19 +73,26 @@ def read_and_concatenate_excel_files():
         df = pd.read_excel(file_path)
         df['source_file'] = os.path.basename(file_path)
         dataframes.append(df)
-    
+        name=str(os.path.basename(file_path))
     return pd.concat(dataframes, ignore_index=True)
 
 # Usage
 desk = os.getcwd()
 path = desk+ '\\analysis\\'
 files = glob.glob(path+'cyberevents*.xlsx')
+files2=glob.glob(path+'aggregated*.xlsx')
 #print(files)
 
 for file in files:
     attacks = pd.read_excel(str(file))
     #print(path+str(file))
 
+for file in files2:
+    name=str(file)
+
+name=name[58:-14]
+print(name)
+#exit()
 concatenated_df=read_and_concatenate_excel_files()
 
 print(f"Successfully concatenated {len(concatenated_df['source_file'].unique())} files")
@@ -180,7 +187,7 @@ def _save_pickle(obj, path):
 
 def _save_csv(df, path):
     ensure_dir(os.path.dirname(path))
-    df.to_csv(path, index=False)
+    df.to_excel(path, index=False)
 
 
 # -------------------------
@@ -428,7 +435,7 @@ for target_col, horizon in targets:
         results_summary_rows.append(row)
 
 results_df = pd.DataFrame(results_summary_rows)
-results_csv = os.path.join(OUT_DIR, f"results_summary_{TRAIN_START.replace('-','')}_{TRAIN_END.replace('-','')}.csv")
+results_csv = os.path.join(OUT_DIR, f"results_{name}_summary_{TRAIN_START.replace('-','')}_{TRAIN_END.replace('-','')}.xlsx")
 _save_csv(results_df, results_csv)
 #_save_pickle(results_summary_rows, os.path.join(models_dir, f"results_summary_{TRAIN_START.replace('-','')}_{TRAIN_END.replace('-','')}.pkl"))
 
@@ -564,7 +571,7 @@ merged.drop(columns=["EventDate_earliest"], inplace=True)
 # Persist merged alert table (test-only) with TN/TP/FP/FN and Anticipated_* columns
 # -------------------------
 timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-alert_csv = os.path.join(alerts_dir, f"next_day_alerts_posttrain_{TRAIN_END.replace('-','')}_{timestamp}.csv")
+alert_csv = os.path.join(alerts_dir, f"next_day_{name}_posttrain_{TRAIN_END.replace('-','')}_{timestamp}.xlsx")
 _save_csv(merged, alert_csv)
 
 # -------------------------
@@ -573,7 +580,7 @@ _save_csv(merged, alert_csv)
 def calculate_alert_efficiency_on_df(df_local, prob_col, true_col, threshold=0.3, cost_per_missed_event=10000, cost_per_false_alert=100):
     total_days = len(df_local)
     if total_days == 0:
-        return {"TP": 0, "FP": 0, "FN": 0, "TN": 0, "total_days": 0, "precision": None, "recall": None, "f1_score": None, "alert_rate": None, "false_alert_ratio": None, "missed_event_cost": None, "false_alert_cost": None, "Events_occurred":0,"Predicted3D": 0,"Predicted7D": 0}
+        return {"TP": 0, "FP": 0, "FN": 0, "TN": 0, "total_days": 0, "precision": None, "recall": None, "f1_score": None, "alert_rate": None, "false_alert_ratio": None, "missed_event_cost": None, "false_alert_cost": None, "Events_occurred":0,"Predicted3D": 0,"Predicted7D": 0,"prediction7Dpercentage": 0}
     preds = (df_local[prob_col] >= threshold).astype(int)
     truth = df_local[true_col].astype(int)
     TP = int(((preds == 1) & (truth == 1)).sum())
@@ -589,12 +596,13 @@ def calculate_alert_efficiency_on_df(df_local, prob_col, true_col, threshold=0.3
     Predicted7D=df_local['Tier1_Alert_Flag7D'].value_counts().get(True, 0)
     precision = TP / (TP + FP) if (TP + FP) > 0 else 0.0
     recall = TP / (TP + FN) if (TP + FN) > 0 else 0.0
+    prediction7Dpercentage = Predicted7D/Events_occurred
     f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
     alert_rate = (TP + FP) / total_days
     false_alert_ratio = FP / (TP + FP) if (TP + FP) > 0 else 0.0
     missed_event_cost = FN * cost_per_missed_event
     false_alert_cost = FP * cost_per_false_alert
-    return {"TP": TP, "FP": FP, "FN": FN, "TN": TN, "total_days": total_days, "precision": precision, "recall": recall, "f1_score": f1_score, "alert_rate": alert_rate, "false_alert_ratio": false_alert_ratio, "missed_event_cost": missed_event_cost, "false_alert_cost": false_alert_cost,"Events_occurred":Events_occurred,"Predicted1D": Predicted1D,"Predicted3D": Predicted3D,"Predicted7D": Predicted7D}
+    return {"TP": TP, "FP": FP, "FN": FN, "TN": TN, "total_days": total_days, "precision": precision, "recall": recall, "f1_score": f1_score, "false_alert_ratio": false_alert_ratio, "missed_event_cost": missed_event_cost, "false_alert_cost": false_alert_cost,"Events_occurred":Events_occurred,"Predicted1D": Predicted1D,"Predicted3D": Predicted3D,"Predicted7D": Predicted7D,"prediction7Dpercentage": prediction7Dpercentage}
 
 def business_efficiency(metrics_dict, benefit_of_catching_event=50000, cost_of_response=2000, response_cost=2000, opportunity_cost=500, alert_fatigue_cost=100, cost_per_FN=50000, system_maintenance_cost=10000):
     TP = metrics_dict.get("TP", 0)
@@ -631,7 +639,9 @@ for horizon, d in metrics_summaries.items():
     eff = d.get("efficiency", {})
     biz = d.get("business", {})
     row = {
+        "name": name,
         "horizon": horizon,
+        "threshold": TIER_THRESHOLD,
         "TP": eff.get("TP"),
         "FP": eff.get("FP"),
         "FN": eff.get("FN"),
@@ -639,20 +649,15 @@ for horizon, d in metrics_summaries.items():
         "events": eff.get("Events_occurred"),
         "Predicted3D": eff.get("Predicted3D"),
         "Predicted7D": eff.get("Predicted7D"),
+        "prediction7Dpercentage": eff.get("prediction7Dpercentage"),
         "total_days": eff.get("total_days"),
         "precision": eff.get("precision"),
         "recall": eff.get("recall"),
-        "f1": eff.get("f1_score"),
-        "alert_rate": eff.get("alert_rate"),
-        "false_alert_ratio": eff.get("false_alert_ratio"),
-        "missed_event_cost": eff.get("missed_event_cost"),
-        "false_alert_cost": eff.get("false_alert_cost"),
-        "net_value": biz.get("net_value"),
-        "ROI": biz.get("ROI"),
+        "f1": eff.get("f1_score")
     }
     metrics_rows.append(row)
 metrics_df = pd.DataFrame(metrics_rows)
-metrics_csv = os.path.join(alerts_dir, f"alert_metrics_summary_testonly_{TRAIN_END.replace('-','')}_{timestamp}.csv")
+metrics_csv = os.path.join(alerts_dir, f"alert_{name}_summary_test_{TRAIN_END.replace('-','')}_{timestamp}.xlsx")
 _save_csv(metrics_df, metrics_csv)
 #_save_pickle(metrics_summaries, os.path.join(alerts_dir, f"alert_metrics_summary_testonly_{TRAIN_END.replace('-','')}_{timestamp}.pkl"))
 
@@ -662,39 +667,39 @@ verif_summary = {
     "3-day": {"tp": int(merged["TP_3D"].sum()), "fp": int(merged["FP_3D"].sum()), "fn": int(merged["FN_3D"].sum()), "tn": int(merged["TN_3D"].sum())},
     "7-day": {"tp": int(merged["TP_7D"].sum()), "fp": int(merged["FP_7D"].sum()), "fn": int(merged["FN_7D"].sum()), "tn": int(merged["TN_7D"].sum())},
 }
-_save_pickle(verif_summary, os.path.join(models_dir, f"verification_summary_testonly_{TRAIN_END.replace('-','')}_{timestamp}.pkl"))
+#_save_pickle(verif_summary, os.path.join(models_dir, f"verification_summary_testonly_{TRAIN_END.replace('-','')}_{timestamp}.pkl"))
 
 # -------------------------
 # DIAGNOSTICS (print)
 # -------------------------
 print("Artifacts saved to:", OUT_DIR)
-print(" - Train CSV:", train_csv)
-print(" - Test CSV:", test_csv)
-print(" - Results summary CSV:", results_csv)
-print(" - Alert CSV (test-only rows):", alert_csv)
-print(" - Metrics CSV (test-only):", metrics_csv)
-print("Trained models saved in:", models_dir)
+#print(" - Train CSV:", train_csv)
+#print(" - Test CSV:", test_csv)
+#print(" - Results summary CSV:", results_csv)
+#print(" - Alert CSV (test-only rows):", alert_csv)
+#print(" - Metrics CSV (test-only):", metrics_csv)
+#print("Trained models saved in:", models_dir)
 
-print("\nMODEL AVAILABILITY:")
+#print("\nMODEL AVAILABILITY:")
 for h, models in trained_models.items():
-    print("Horizon:", h, "->", list(models.keys()))
+    #print("Horizon:", h, "->", list(models.keys()))
 
-if len(test_df) > 0:
-    X_test = test_df[feature_cols]
-    print("\nPROBABILITY DISTRIBUTIONS ON TEST SET:")
-    for h, models in trained_models.items():
-        for name, obj in models.items():
-            if name == "Logistic Regression":
-                scaler = obj[1]
-                clf = obj[2]
-                probs = clf.predict_proba(scaler.transform(X_test))[:, 1]
-            elif name == "XGBoost":
-                probs = obj.predict_proba(X_test.values)[:, 1]
-            else:
-                probs = obj.predict_proba(X_test)[:, 1]
-            print(f"{h} / {name}: min={probs.min():.6f} mean={probs.mean():.6f} max={probs.max():.6f} unique={len(np.unique(np.round(probs,6)))}")
+    if len(test_df) > 0:
+        X_test = test_df[feature_cols]
+        #print("\nPROBABILITY DISTRIBUTIONS ON TEST SET:")
+        for h, models in trained_models.items():
+            for name, obj in models.items():
+                if name == "Logistic Regression":
+                    scaler = obj[1]
+                    clf = obj[2]
+                    probs = clf.predict_proba(scaler.transform(X_test))[:, 1]
+                elif name == "XGBoost":
+                    probs = obj.predict_proba(X_test.values)[:, 1]
+                else:
+                    probs = obj.predict_proba(X_test)[:, 1]
+                #print(f"{h} / {name}: min={probs.min():.6f} mean={probs.mean():.6f} max={probs.max():.6f} unique={len(np.unique(np.round(probs,6)))}")
 
-print("\nTEST-ONLY verification summary (TP/FP/FN/TN):")
+print("\nTEST-ONLY verification summary for Logistic regression (TP/FP/FN/TN):")
 print(verif_summary)
 
 # End of script.
