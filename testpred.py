@@ -154,7 +154,8 @@ TRAIN_END = "2022-12-31"
 OUT_DIR = "analysis\\outputs"
 MODEL_ALGO_PREFERENCE = "Logistic Regression" if XGBOOST_AVAILABLE else "Random Forest"  # prefer XGBoost if available
 APPLY_TO = "test"  # 'test' or 'all' (but metrics summaries will be computed only on test)
-TIER_THRESHOLD = 0.5  # single threshold for Tier1/Tier2 (simplified)
+TIER_THRESHOLD = 0.5136560316003032 # single threshold for Tier1/Tier2 (simplified)
+
 
 # Business/cost defaults (editable)
 COST_PER_MISSED_EVENT = 100000
@@ -267,7 +268,9 @@ daily["Tone_MA_28"] = daily["Global_Daily_AvgTone_Sum"].rolling(28, min_periods=
 daily["Tone_Std_7"] = daily["Global_Daily_AvgTone_Sum"].rolling(7, min_periods=1).std().fillna(0)
 
 for lag in [1, 2, 3, 7]:
-    daily[f"Tone_Lag_{lag}"] = daily["Global_Daily_AvgTone_Sum"].shift(lag)
+    #adjust shifting on MA28
+    daily[f"Tone_Lag_{lag}"] = daily["Tone_MA_28"].shift(lag)
+    #daily[f"Tone_Lag_{lag}"] = daily["Global_Daily_AvgTone_Sum"].shift(lag)
 daily["Event_Lag_1"] = daily["Event_Occurred"].shift(1)
 daily["Event_Lag_3"] = daily["Event_Occurred"].shift(3)
 daily["Event_Lag_7"] = daily["Event_Occurred"].shift(7)
@@ -312,8 +315,9 @@ ensure_dir(alerts_dir)
 
 train_csv = os.path.join(OUT_DIR, f"train_df_{TRAIN_START.replace('-','')}_{TRAIN_END.replace('-','')}.csv")
 test_csv = os.path.join(OUT_DIR, f"test_df_post_{TRAIN_END.replace('-','')}.csv")
-_save_csv(train_df, train_csv)
-_save_csv(test_df, test_csv)
+#removed save
+#_save_csv(train_df, train_csv)
+#_save_csv(test_df, test_csv)
 
 diag = {
     "train_rows": len(train_df),
@@ -323,7 +327,9 @@ diag = {
     "test_start": str(test_df["Date"].min()) if len(test_df) > 0 else None,
     "test_end": str(test_df["Date"].max()) if len(test_df) > 0 else None,
 }
-pd.DataFrame([diag]).to_csv(os.path.join(OUT_DIR, "training_diag.csv"), index=False)
+print(diag)
+
+#pd.DataFrame([diag]).to_csv(os.path.join(OUT_DIR, "training_diag.csv"), index=False)
 
 # -------------------------
 # MODEL TRAINING
@@ -408,10 +414,10 @@ for target_col, horizon in targets:
                     "f1": float(f1),
                 }
             )
-
+            print("model "+ str(model_name)+"horizon "+str(horizon)+" optimal threshold "+str(float(opt_th)) + " f1 "+str(float(f1)))
             model_fname = f"model_{horizon.replace(' ','_')}_{model_name.replace(' ','_')}.pkl"
             model_path = os.path.join(models_dir, model_fname)
-            _save_pickle(trained_obj, model_path)
+            #_save_pickle(trained_obj, model_path)
             row["model_path"] = model_path
 
             trained_models[horizon][model_name] = trained_obj
@@ -424,7 +430,7 @@ for target_col, horizon in targets:
 results_df = pd.DataFrame(results_summary_rows)
 results_csv = os.path.join(OUT_DIR, f"results_summary_{TRAIN_START.replace('-','')}_{TRAIN_END.replace('-','')}.csv")
 _save_csv(results_df, results_csv)
-_save_pickle(results_summary_rows, os.path.join(models_dir, f"results_summary_{TRAIN_START.replace('-','')}_{TRAIN_END.replace('-','')}.pkl"))
+#_save_pickle(results_summary_rows, os.path.join(models_dir, f"results_summary_{TRAIN_START.replace('-','')}_{TRAIN_END.replace('-','')}.pkl"))
 
 # trainer dict compatibility
 trainer = {
@@ -490,11 +496,11 @@ tier1 = TIER_THRESHOLD
 tier2 = TIER_THRESHOLD  # single tier
 
 apply_df["Tier1_Alert_1D"] = (apply_df["Prob_1D"] >= tier1).astype(int)
-apply_df["Tier2_Alert_1D"] = (apply_df["Prob_1D"] >= tier2).astype(int)
+#apply_df["Tier2_Alert_1D"] = (apply_df["Prob_1D"] >= tier2).astype(int)
 apply_df["Tier1_Alert_3D"] = (apply_df["Prob_3D"] >= tier1).astype(int)
-apply_df["Tier2_Alert_3D"] = (apply_df["Prob_3D"] >= tier2).astype(int)
+#apply_df["Tier2_Alert_3D"] = (apply_df["Prob_3D"] >= tier2).astype(int)
 apply_df["Tier1_Alert_7D"] = (apply_df["Prob_7D"] >= tier1).astype(int)
-apply_df["Tier2_Alert_7D"] = (apply_df["Prob_7D"] >= tier2).astype(int)
+#apply_df["Tier2_Alert_7D"] = (apply_df["Prob_7D"] >= tier2).astype(int)
 
 # Merge apply_df with test_df to ensure summaries are computed only on test data
 # We'll merge on Date and keep only rows present in test_df (post-train test set)
@@ -531,49 +537,25 @@ merged["FN_7D"] = ((merged["Tier1_Alert_7D"] == 0) & (merged["Event_Next_7D"] ==
 # We'll construct a prediction-alert lookup (preds) covering the test prediction rows only (dates in merged)
 preds = apply_df[["Date", "Tier1_Alert_1D", "Tier1_Alert_3D", "Tier1_Alert_7D"]].copy().set_index("Date").sort_index()
 
-# For 1D: event_date = prediction Date + 1; an event is anticipated if the same prediction row had Tier1_Alert_1D==1
-merged["Anticipated_1D"] = merged.apply(
-    lambda r: bool(r["Tier1_Alert_1D"] == 1) if r.get("Event_Next_1D", 0) == 1 else False, axis=1
-)
 
+merged['Tier1_Alert_1D_prior'] = merged['Tier1_Alert_1D'].shift(1).rolling(window=1, min_periods=1).max()
+merged['Tier1_Alert_Flag1D'] = (merged['Event_Occurred'] == 1) & (merged['Tier1_Alert_1D_prior'] > 0)
 
-
-
-
-# For 3D and 7D: conservative check using earliest possible event day = prediction Date + 1.
-# If any Tier1 alert of corresponding horizon exists in the lookback window [event_day - lookback, event_day - 1],
-# we mark the event as anticipated. The lookback equals the horizon window length (3 or 7).
-def any_prior_alert_for_event(event_date, lookback_days, alert_col, preds_indexed):
-    start = (pd.to_datetime(event_date) - pd.Timedelta(days=lookback_days)).normalize()
-    end = (pd.to_datetime(event_date) - pd.Timedelta(days=1)).normalize()
-    if end < start:
-        return False
-    try:
-        window = preds_indexed.loc[start:end]
-    except KeyError:
-        return False
-    if window.empty:
-        return False
-    return bool((window[alert_col] == 1).any())
 
 # Add earliest possible event dates for merged rows
 merged["EventDate_earliest"] = pd.to_datetime(merged["Date"]) + pd.Timedelta(days=1)
 
 # Anticipated_3D: check lookback 3 days for Tier1_Alert_3D
-merged["Anticipated_3D"] = merged.apply(
-    lambda r: any_prior_alert_for_event(r["EventDate_earliest"], lookback_days=3, alert_col="Tier1_Alert_3D", preds_indexed=preds)
-    if r.get("Event_Next_3D", 0) == 1
-    else False,
-    axis=1,
-)
+
+
+merged['Tier1_Alert_3D_prior'] = merged['Tier1_Alert_3D'].shift(1).rolling(window=3, min_periods=3).max()
+merged['Tier1_Alert_Flag3D'] = (merged['Event_Occurred'] == 1) & (merged['Tier1_Alert_3D_prior'] > 0)
 
 # Anticipated_7D: check lookback 7 days for Tier1_Alert_7D
-merged["Anticipated_7D"] = merged.apply(
-    lambda r: any_prior_alert_for_event(r["EventDate_earliest"], lookback_days=7, alert_col="Tier1_Alert_7D", preds_indexed=preds)
-    if r.get("Event_Next_7D", 0) == 1
-    else False,
-    axis=1,
-)
+
+merged['Tier1_Alert_7D_prior'] = merged['Tier1_Alert_7D'].shift(1).rolling(window=7, min_periods=7).max()
+merged['Tier1_Alert_Flag7D'] = (merged['Event_Occurred'] == 1) & (merged['Tier1_Alert_7D_prior'] > 0)
+
 
 # drop helper column
 merged.drop(columns=["EventDate_earliest"], inplace=True)
@@ -591,13 +573,20 @@ _save_csv(merged, alert_csv)
 def calculate_alert_efficiency_on_df(df_local, prob_col, true_col, threshold=0.3, cost_per_missed_event=10000, cost_per_false_alert=100):
     total_days = len(df_local)
     if total_days == 0:
-        return {"TP": 0, "FP": 0, "FN": 0, "TN": 0, "total_days": 0, "precision": None, "recall": None, "f1_score": None, "alert_rate": None, "false_alert_ratio": None, "missed_event_cost": None, "false_alert_cost": None}
+        return {"TP": 0, "FP": 0, "FN": 0, "TN": 0, "total_days": 0, "precision": None, "recall": None, "f1_score": None, "alert_rate": None, "false_alert_ratio": None, "missed_event_cost": None, "false_alert_cost": None, "Events_occurred":0,"Predicted3D": 0,"Predicted7D": 0}
     preds = (df_local[prob_col] >= threshold).astype(int)
     truth = df_local[true_col].astype(int)
     TP = int(((preds == 1) & (truth == 1)).sum())
     FP = int(((preds == 1) & (truth == 0)).sum())
     FN = int(((preds == 0) & (truth == 1)).sum())
     TN = int(((preds == 0) & (truth == 0)).sum())
+    #fixing measurements
+    
+    Events_occurred=df_local['Event_Occurred'].sum()
+    
+    Predicted1D=df_local['Tier1_Alert_Flag1D'].value_counts().get(True, 0)
+    Predicted3D=df_local['Tier1_Alert_Flag3D'].value_counts().get(True, 0)
+    Predicted7D=df_local['Tier1_Alert_Flag7D'].value_counts().get(True, 0)
     precision = TP / (TP + FP) if (TP + FP) > 0 else 0.0
     recall = TP / (TP + FN) if (TP + FN) > 0 else 0.0
     f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
@@ -605,7 +594,7 @@ def calculate_alert_efficiency_on_df(df_local, prob_col, true_col, threshold=0.3
     false_alert_ratio = FP / (TP + FP) if (TP + FP) > 0 else 0.0
     missed_event_cost = FN * cost_per_missed_event
     false_alert_cost = FP * cost_per_false_alert
-    return {"TP": TP, "FP": FP, "FN": FN, "TN": TN, "total_days": total_days, "precision": precision, "recall": recall, "f1_score": f1_score, "alert_rate": alert_rate, "false_alert_ratio": false_alert_ratio, "missed_event_cost": missed_event_cost, "false_alert_cost": false_alert_cost}
+    return {"TP": TP, "FP": FP, "FN": FN, "TN": TN, "total_days": total_days, "precision": precision, "recall": recall, "f1_score": f1_score, "alert_rate": alert_rate, "false_alert_ratio": false_alert_ratio, "missed_event_cost": missed_event_cost, "false_alert_cost": false_alert_cost,"Events_occurred":Events_occurred,"Predicted1D": Predicted1D,"Predicted3D": Predicted3D,"Predicted7D": Predicted7D}
 
 def business_efficiency(metrics_dict, benefit_of_catching_event=50000, cost_of_response=2000, response_cost=2000, opportunity_cost=500, alert_fatigue_cost=100, cost_per_FN=50000, system_maintenance_cost=10000):
     TP = metrics_dict.get("TP", 0)
@@ -629,9 +618,11 @@ for horizon, (prob_col, true_col) in horizon_map.items():
     if prob_col not in merged.columns or true_col not in merged.columns:
         metrics_summaries[horizon] = {"error": f"missing {prob_col} or {true_col} in merged test dataset"}
         continue
+    #print(merged)
     eff = calculate_alert_efficiency_on_df(merged, prob_col, true_col, threshold=tier1, cost_per_missed_event=COST_PER_MISSED_EVENT, cost_per_false_alert=COST_PER_FALSE_ALERT)
     biz = business_efficiency(eff, benefit_of_catching_event=BENEFIT_OF_CATCHING_EVENT, cost_of_response=COST_OF_RESPONSE, response_cost=COST_OF_RESPONSE, opportunity_cost=500, alert_fatigue_cost=100, cost_per_FN=COST_PER_MISSED_EVENT, system_maintenance_cost=SYSTEM_MAINTENANCE_COST)
-    metrics_summaries[horizon] = {"efficiency": eff, "business": biz}
+    metrics_summaries[horizon] = {"efficiency": eff}
+    #metrics_summaries[horizon] = {"efficiency": eff, "business": biz}
 
 # Persist metrics summary CSV (one row per horizon)
 timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
@@ -645,6 +636,9 @@ for horizon, d in metrics_summaries.items():
         "FP": eff.get("FP"),
         "FN": eff.get("FN"),
         "TN": eff.get("TN"),
+        "events": eff.get("Events_occurred"),
+        "Predicted3D": eff.get("Predicted3D"),
+        "Predicted7D": eff.get("Predicted7D"),
         "total_days": eff.get("total_days"),
         "precision": eff.get("precision"),
         "recall": eff.get("recall"),
@@ -660,7 +654,7 @@ for horizon, d in metrics_summaries.items():
 metrics_df = pd.DataFrame(metrics_rows)
 metrics_csv = os.path.join(alerts_dir, f"alert_metrics_summary_testonly_{TRAIN_END.replace('-','')}_{timestamp}.csv")
 _save_csv(metrics_df, metrics_csv)
-_save_pickle(metrics_summaries, os.path.join(alerts_dir, f"alert_metrics_summary_testonly_{TRAIN_END.replace('-','')}_{timestamp}.pkl"))
+#_save_pickle(metrics_summaries, os.path.join(alerts_dir, f"alert_metrics_summary_testonly_{TRAIN_END.replace('-','')}_{timestamp}.pkl"))
 
 # Persist verification summary (TP/FP/FN/TN) per horizon (test-only)
 verif_summary = {
