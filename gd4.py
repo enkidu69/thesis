@@ -131,9 +131,9 @@ def download_gdelt_data_direct():
     syear=2015
     start_month=1
     start_day=1
-    eyear=2015
-    end_month=1
-    end_day=1
+    eyear=2025
+    end_month=9
+    end_day=30
     start_date = datetime(syear, start_month, start_day)
     end_date = datetime(eyear, end_month, end_day)
     current_date = start_date
