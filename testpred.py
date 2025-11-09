@@ -90,7 +90,7 @@ for file in files:
 for file in files2:
     name=str(file)
 
-name=name[58:-14]
+name=name[58:-5]
 print(name)
 #exit()
 concatenated_df=read_and_concatenate_excel_files()
@@ -155,13 +155,13 @@ except Exception:
 TONE_CSV = None  # e.g. "data/aggregated_tone.csv"
 ATTACKS_CSV = None  # e.g. "data/cyberevents.csv" or .xlsx
 
-TRAIN_START = "2018-01-01"
+TRAIN_START = "2020-01-01"
 TRAIN_END = "2022-12-31"
 
 OUT_DIR = "analysis\\outputs"
 MODEL_ALGO_PREFERENCE = "Logistic Regression" if XGBOOST_AVAILABLE else "Random Forest"  # prefer XGBoost if available
 APPLY_TO = "test"  # 'test' or 'all' (but metrics summaries will be computed only on test)
-TIER_THRESHOLD = 0.5136560316003032 # single threshold for Tier1/Tier2 (simplified)
+TIER_THRESHOLD = 0.5   # single threshold for Tier1/Tier2 (simplified)
 
 
 # Business/cost defaults (editable)
@@ -341,8 +341,25 @@ print(diag)
 # -------------------------
 # MODEL TRAINING
 # -------------------------
+
+from sklearn.linear_model import LogisticRegressionCV
+
+model = LogisticRegression(
+    class_weight="balanced",
+    random_state=42, 
+    max_iter=2000,
+    solver='liblinear',
+    penalty='l2'
+)
+
+
 base_models = {
-    "Logistic Regression": LogisticRegression(class_weight="balanced", random_state=42, max_iter=1000),
+    "Logistic Regression": LogisticRegressionCV(class_weight="balanced",
+    random_state=42,
+    max_iter=4000, 
+    cv=5,
+    scoring='f1',
+    solver='liblinear'),
     "Random Forest": RandomForestClassifier(n_estimators=200, class_weight="balanced", random_state=42),
 }
 if XGBOOST_AVAILABLE:
@@ -382,6 +399,48 @@ for target_col, horizon in targets:
                 model_inst.fit(X_train_s, y_train)
                 y_proba = model_inst.predict_proba(X_test_s)[:, 1]
                 trained_obj = ("pipeline", scaler, model_inst)
+                            # Find all thresholds where TP > FP (precision > 0.5) AND we actually predict some events
+                precision_vals, recall_vals, thresholds = precision_recall_curve(y_test, y_proba)
+                viable_thresholds = []
+
+                for i, threshold in enumerate(thresholds):
+                    current_precision = precision_vals[i]
+                    current_recall = recall_vals[i]
+                    
+                    # Must have: TP > FP AND catch some events (not zero recall)
+                    if current_precision > 0.5 and current_recall > 0:
+                        f1 = 2 * (current_precision * current_recall) / (current_precision + current_recall + 1e-8)
+                        viable_thresholds.append((threshold, current_precision, current_recall, f1))
+
+                if viable_thresholds:
+                    # Strategy 1: Choose the one with best F1 score
+                    best_threshold, best_precision, best_recall, best_f1 = max(viable_thresholds, key=lambda x: x[3])
+                    
+                    print("VIABLE THRESHOLDS (TP > FP):")
+                    for th, prec, rec, f1 in viable_thresholds:
+                        print(f"  {th:.3f} | Precision: {prec:.3f} | Recall: {rec:.3f} | F1: {f1:.3f}")
+                    
+                    print(f"\nSELECTED: threshold={best_threshold:.3f}")
+                    print(f"Precision: {best_precision:.3f}, Recall: {best_recall:.3f}, F1: {best_f1:.3f}")
+                    
+                    optimal_threshold = best_threshold
+
+                else:
+                    # Fallback: Use your known working threshold
+                    print("No viable thresholds found, using known working TIER THRESHOLD")
+                    optimal_threshold = TIER_THRESHOLD
+                
+                # Apply the selected threshold
+                y_pred_optimized = (y_proba > optimal_threshold)
+
+                # Verify the results
+                tp = ((y_pred_optimized == 1) & (y_test == 1)).sum()
+                fp = ((y_pred_optimized == 1) & (y_test == 0)).sum()
+                fn = ((y_pred_optimized == 0) & (y_test == 1)).sum()
+
+                print(f"\nFINAL Optimization RESULTS:")
+                print(f"TP: {tp}, FP: {fp}, FN: {fn}")
+                print(f"TP > FP: {tp > fp} | Precision: {tp/(tp+fp):.3f} | Recall: {tp/(tp+fn):.3f}")
             elif model_name == "XGBoost":
                 model_inst.fit(X_train.values, y_train.values)
                 y_proba = model_inst.predict_proba(X_test.values)[:, 1]
@@ -391,12 +450,18 @@ for target_col, horizon in targets:
                 y_proba = model_inst.predict_proba(X_test)[:, 1]
                 trained_obj = model_inst
 
-            precision_vals, recall_vals, thresholds = precision_recall_curve(y_test, y_proba)
+
+            
+
+            
+            #apply the manual threshold
+            opt_th = TIER_THRESHOLD
+            
             if len(thresholds) > 0:
                 f1_scores = 2 * (precision_vals[:-1] * recall_vals[:-1]) / (precision_vals[:-1] + recall_vals[:-1] + 1e-8)
                 opt_th = thresholds[np.argmax(f1_scores)]
             else:
-                opt_th = 0.5
+                opt_th = TIER_THRESHOLD
             y_pred = (y_proba >= opt_th).astype(int)
 
             try:
