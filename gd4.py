@@ -30,13 +30,11 @@ pd.options.mode.chained_assignment = None  # default='warn'
 
 
 
-# FIPS to country name mapping
-FIPS_TO_ISO2 = {'AF': 'AFGHANISTAN','AL': 'ALBANIA','AG': 'ALGERIA','AQ': 'AMERICAN SAMOA','AN': 'ANDORRA','AO': 'ANGOLA','AV': 'ANGUILLA','AY': 'ANTARCTICA','AC': 'ANTIGUA AND BARBUDA','AR': 'ARGENTINA','AM': 'ARMENIA','AA': 'ARUBA','AT': 'ASHMORE AND CARTIER ISLANDS','AS': 'AUSTRALIA','AU': 'AUSTRIA','AJ': 'AZERBAIJAN','BF': 'BAHAMAS, THE','BA': 'BAHRAIN','FQ': 'BAKER ISLAND','BG': 'BANGLADESH','BB': 'BARBADOS','BS': 'BASSAS DA INDIA','BO': 'BELARUS','BE': 'BELGIUM','BH': 'BELIZE','BN': 'BENIN','BD': 'BERMUDA','BT': 'BHUTAN','BL': 'BOLIVIA','BK': 'BOSNIA AND HERZEGOVINA','BC': 'BOTSWANA','BV': 'BOUVET ISLAND','BR': 'BRAZIL','IO': 'BRITISH INDIAN OCEAN TERRITORY','VI': 'BRITISH VIRGIN ISLANDS','BX': 'BRUNEI','BU': 'BULGARIA','UV': 'BURKINA','BM': 'BURMA','BY': 'BURUNDI','CB': 'CAMBODIA','CM': 'CAMEROON','CA': 'CANADA','CV': 'CAPE VERDE','CJ': 'CAYMAN ISLANDS','CT': 'CENTRAL AFRICAN REPUBLIC','CD': 'CHAD','CI': 'CHILE','CH': 'CHINA','KT': 'CHRISTMAS ISLAND','IP': 'CLIPPERTON ISLAND','CK': 'COCOS (KEELING) ISLANDS','CO': 'COLOMBIA','CN': 'COMOROS','CF': 'CONGO','CW': 'COOK ISLANDS','CR': 'CORAL SEA ISLANDS','CS': 'COSTA RICA','IV': 'COTE DIVOIRE','HR':'CROATIA','CU': 'CUBA','CY': 'CYPRUS','EZ': 'CZECH REPUBLIC','DA': 'DENMARK','DJ': 'DJIBOUTI','DO': 'DOMINICA','DR': 'DOMINICAN REPUBLIC','EC': 'ECUADOR','EG': 'EGYPT','ES': 'EL SALVADOR','EK': 'EQUATORIAL GUINEA','ER': 'ERITREA','EN': 'ESTONIA','ET': 'ETHIOPIA','EU': 'EUROPA ISLAND','FK': 'FALKLAND ISLANDS (ISLAS MALVINAS)','FO': 'FAROE ISLANDS','FM': 'FEDERATED STATES OF MICRONESIA','FJ': 'FIJI','FI': 'FINLAND','FR': 'FRANCE','FG': 'FRENCH GUIANA','FP': 'FRENCH POLYNESIA','FS': 'FRENCH SOUTHERN AND ANTARCTIC LANDS','GB': 'GABON','GA': 'GAMBIA, THE','GZ': 'GAZA STRIP','GG': 'GEORGIA','GM': 'GERMANY state/land','GH': 'GHANA','GI': 'GIBRALTAR','GO': 'GLORIOSO ISLANDS','GR': 'GREECE','GL': 'GREENLAND','GJ': 'GRENADA','GP': 'GUADELOUPE','GQ': 'GUAM','GT': 'GUATEMALA','GK': 'GUERNSEY','GV': 'GUINEA','PU': 'GUINEA-BISSAU','GY': 'GUYANA','HA': 'HAITI','HM': 'HEARD ISLAND AND MCDONALD ISLANDS','HO': 'HONDURAS','HK': 'HONG KONG','HQ': 'HOWLAND ISLAND','HU': 'HUNGARY','IC': 'ICELAND','IN': 'INDIA','ID': 'INDONESIA','IR': 'IRAN','IZ': 'IRAQ','EI': 'IRELAND','IS': 'ISRAEL','IT': 'ITALY','JM': 'JAMAICA','JN': 'JAN MAYEN','JA': 'JAPAN','DQ': 'JARVIS ISLAND','JE': 'JERSEY','JQ': 'JOHNSTON ATOLL','JO': 'JORDAN','JU': 'JUAN DE NOVA ISLAND','KZ': 'KAZAKHSTAN','KE': 'KENYA','KQ': 'KINGMAN REEF','KR': 'KIRIBATI','KN': 'KOREA, DEMOCRATIC PEOPLES REPUBLIC OF','KS': 'KOREA, REPUBLIC OF','KU': 'KUWAIT','KG': 'KYRGYZSTAN ','LA': 'LAOS','LG': 'LATVIA','LE': 'LEBANON','LT': 'LESOTHO','LI': 'LIBERIA','LY': 'LIBYA','LS': 'LIECHTENSTEIN','LH': 'LITHUANIA','LU': 'LUXEMBOURG','MC': 'MACAU','MK': 'MACEDONIA','MA': 'MADAGASCAR','MI': 'MALAWI','MY': 'MALAYSIA','MV': 'MALDIVES','ML': 'MALI','MT': 'MALTA','IM': 'MAN, ISLE OF','RM': 'MARSHALL ISLANDS','MB': 'MARTINIQUE','MR': 'MAURITANIA','MP': 'MAURITIUS','MF': 'MAYOTTE','MX': 'MEXICO','MQ': 'MIDWAY ISLANDS','MD': 'MOLDOVA','MN': 'MONACO','MG': 'MONGOLIA','MW': 'MONTENEGRO','MH': 'MONTSERRAT','MO': 'MOROCCO','MZ': 'MOZAMBIQUE','WA': 'NAMIBIA','NR': 'NAURU','BQ': 'NAVASSA ISLAND','NP': 'NEPAL','NL': 'NETHERLANDS','NT': 'NETHERLANDS ANTILLES','NC': 'NEW CALEDONIA','NZ': 'NEW ZEALAND','NU': 'NICARAGUA','NG': 'NIGER','NI': 'NIGERIA','NE': 'NIUE','NF': 'NORFOLK ISLAND','CQ': 'NORTHERN MARIANA ISLANDS','NO': 'NORWAY','MU': 'OMAN','PK': 'PAKISTAN','LQ': 'PALMYRA ATOLL','PM': 'PANAMA','PP': 'PAPUA NEW GUINEA','PF': 'PARACEL ISLANDS','PA': 'PARAGUAY','PE': 'PERU','RP': 'PHILIPPINES','PC': 'PITCAIRN ISLANDS','PL': 'POLAND','PO': 'PORTUGAL','RQ': 'PUERTO RICO','QA': 'QATAR','RE': 'REUNION','RO': 'ROMANIA','RS': 'RUSSIA','RW': 'RWANDA','SC': 'ST. KITTS AND NEVIS','SH': 'ST. HELENA','ST': 'ST. LUCIA','SB': 'ST. PIERRE AND MIQUELON','VC': 'ST. VINCENT AND THE GRENADINES','SM': 'SAN MARINO','TP': 'SAO TOME AND PRINCIPE','SA': 'SAUDI ARABIA','SG': 'SENEGAL','SR': 'SERBIA','SE': 'SEYCHELLES','SL': 'SIERRA LEONE','SN': 'SINGAPORE','LO': 'SLOVAKIA','SI': 'SLOVENIA','BP': 'SOLOMON ISLANDS','SO': 'SOMALIA','SF': 'SOUTH AFRICA','SX': 'SOUTH GEORGIA AND THE SOUTH SANDWICH ISLANDS','SP': 'SPAIN','PG': 'SPRATLY ISLANDS','CE': 'SRI LANKA','SU': 'SUDAN','NS': 'SURINAME','SV': 'SVALBARD','WZ': 'SWAZILAND','SW': 'SWEDEN','SZ': 'SWITZERLAND','SY': 'SYRIA','TI': 'TAJIKISTAN','TZ': 'TANZANIA','TH': 'THAILAND','TO': 'TOGO','TL': 'TOKELAU','TN': 'TONGA','TD': 'TRINIDAD AND TOBAGO','TE': 'TROMELIN ISLAND','PS': 'TRUST TERRITORY OF THE PACIFIC ISLANDS (PALAU)','TS': 'TUNISIA','TU': 'TURKEY','TX': 'TURKMENISTAN','TK': 'TURKS AND CAICOS ISLANDS','TV': 'TUVALU','UG': 'UGANDA','UP': 'UKRAINE','TC': 'UNITED ARAB EMIRATES','UK': 'UNITED KINGDOM','UK': 'UNITED KINGDOM','UK': 'UNITED KINGDOM','UK': 'UNITED KINGDOM','US': 'UNITED STATES','UY': 'URUGUAY','UZ': 'UZBEKISTAN','NH': 'VANUATU','VT': 'VATICAN CITY','VE': 'VENEZUELA','VM': 'VIETNAM','VQ': 'VIRGIN ISLANDS','WQ': 'WAKE ISLAND','WF': 'WALLIS AND FUTUNA','WE': 'WEST BANK','WI': 'WESTERN SAHARA','WS': 'WESTERN SAMOA','YM': 'YEMEN','CG': 'ZAIRE','ZA': 'ZAMBIA','ZI': 'ZIMBABWE','TW': 'TAIWAN'}
 
 # Global variable to track interruption
 interrupted = False
 
-syear=2018
+syear=2015
 year=syear
 #start_month=1 
 #start_day=1
@@ -130,12 +128,12 @@ def download_gdelt_data_direct():
     temp_dir = 'temp_data_direct'
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
-    syear=2018
+    syear=2015
     start_month=1
     start_day=1
-    eyear=2025
-    end_month=10
-    end_day=30
+    eyear=2015
+    end_month=1
+    end_day=1
     start_date = datetime(syear, start_month, start_day)
     end_date = datetime(eyear, end_month, end_day)
     current_date = start_date
@@ -228,11 +226,11 @@ def main():
     print("Press Ctrl+C at any time to interrupt the process")
     
     # STEP 1: INITIALIZE PARAMETERS
-    print("\nSTEP 1: Initializing parameters...")
+    print("\nSTEP 1: Initializing parametesrs...")
     
     # Fixed parameters
     YEAR = syear  # Using 2024 for actual data
-    FOCAL_COUNTRIES = ['FR']  # Countries we're analyzing
+    FOCAL_COUNTRIES = ['UK']  # Countries we're analyzing
 #############################################################################################COUNTRY
     EVENT_ROOTCODES= ['10','11','12','13','14','15','16','17','18','19','20']
     # Event codes to filter for (political/diplomatic events)
@@ -246,7 +244,9 @@ def main():
     print("\nSTEP 2: Selecting counterpart countries...")
 
     # Default selection
-    default_counterparts = ['RS','IZ','IS','US', 'FR', 'UK', 'IT','SP','IR', 'AG', 'AJ', 'AM','BG', 'CH', 'GZ', 'HK', 'IN', 'ID', 'KN', 'KZ', 'LY','MD','MY', 'NU', 'PK', 'SA', 'SU', 'SY','TU', 'UZ', 'VE', 'WE', 'YM', 'XX']
+    #default_counterparts = ['RS','IZ','IS','US', 'FR', 'UK', 'IT','SP','IR', 'AG', 'AJ', 'AM','BG', 'CH', 'GZ', 'HK', 'IN', 'ID', 'KN', 'KZ', 'LY','MD','MY', 'NU', 'PK', 'SA', 'SU', 'SY','TU', 'UZ', 'VE', 'WE', 'YM', 'XX', 'BU']
+    #enhanced list
+    default_counterparts = ['RS','IZ','IS','IR', 'AG', 'AJ', 'AM','BG', 'CH', 'GZ', 'HK', 'IN', 'ID', 'KN', 'KZ', 'LY','MD','MY', 'NU','NI', 'PK', 'SA', 'SU', 'SY','TU', 'UZ', 'VE', 'WE', 'YM', 'XX','BU', 'TC', 'LE', 'VN']
     #default_counterparts = ['RS']
     
     #default_counterparts = ['AF','AL','AG','AQ','AN','AO','AV','AY','AC','AR','AM','AA','AT','AS','AU','AJ','BF','BA','FQ','BG','BB','BS','BO','BE','BH','BN','BD','BT','BL','BK','BC','BV','BR','IO','VI','BX','BU','UV','BM','BY','CB','CM','CA','CV','CJ','CT','CD','CI','CH','KT','IP','CK','CO','CN','CF','CW','CR','CS','IV','HR','CU','CY','EZ','DA','DJ','DO','DR','EC','EG','ES','EK','ER','EN','ET','EU','FK','FO','FM','FJ','FI','FR','FG','FP','FS','GB','GA','GZ','GG','GM','GH','GI','GO','GR','GL','GJ','GP','GQ','GT','GK','GV','PU','GY','HA','HM','HO','HK','HQ','HU','IC','IN','ID','IR','IZ','EI','IS','IT','JM','JN','JA','DQ','JE','JQ','JO','JU','KZ','KE','KQ','KR','KN','KS','KU','KG','LA','LG','LE','LT','LI','LY','LS','LH','LU','MC','MK','MA','MI','MY','MV','ML','MT','IM','RM','MB','MR','MP','MF','MX','MQ','MD','MN','MG','MW','MH','MO','MZ','WA','NR','BQ','NP','NL','NT','NC','NZ','NU','NG','NI','NE','NF','CQ','NO','MU','PK','LQ','PM','PP','PF','PA','PE','RP','PC','PL','PO','RQ','QA','RE','RO','RS','RW','SC','SH','ST','SB','VC','SM','TP','SA','SG','SR','SE','SL','SN','LO','SI','BP','SO','SF','SX','SP','PG','CE','SU','NS','SV','WZ','SW','SZ','SY','TI','TZ','TH','TO','TL','TN','TD','TE','PS','TS','TU','TX','TK','TV','UG','UP','TC','UK','UK','UK','UK','US','UY','UZ','NH','VT','VE','VM','VQ','WQ','WF','WE','WI','WS','YM','CG','ZA','ZI','TW']
@@ -354,13 +354,13 @@ def main():
                     #print(df_filtered)
                     #df_filtered=df_filtered[df_filtered["EventCode"].astype(str).isin(EVENT_CODES)]
                     #print("EVENT CODES USED")
-                    #root="events"
+                    #root="selected"
                     #rootcode filter
-                    #df_filtered=df_filtered[df_filtered["EventRootCode"].astype(str).isin(EVENT_ROOTCODES)]
-                    #print("ROOT CODES USED")
-                    #root="root"
+                    df_filtered=df_filtered[df_filtered["EventRootCode"].astype(str).isin(EVENT_ROOTCODES)]
+                    print("ROOT CODES USED")
+                    root="root"
                     #df_filtered=df_filtered[df_filtered['Actor2Geo_CountryCode'].replace("", focal_country)]
-                    root="all"
+                    #root="all"
 
                     #print(len(df_filtered))
                     if len(df_filtered) > 0:
@@ -441,12 +441,12 @@ def main():
 
         before_filter = len(combined_df)
 #######COUNTERPARTFILTER#################################ignored counterpart filter###################################################################################################################################
-        #combined_df = combined_df[counterpart_filter].copy()
-        #cps="counterparts"
+        combined_df = combined_df[counterpart_filter].copy()
+        cps="counterparts enhanced"
         #print("COUNTERPART FILTER")
         
-        print("NO COUNTERPART FILTER  -ALL COUNTRIES USED")
-        cps="all"
+        #print("NO COUNTERPART FILTER  -ALL COUNTRIES USED")
+        #cps="all"
         
         print(f"✓ Filtered to {len(combined_df):,} events (from {before_filter:,})")
         
@@ -573,22 +573,35 @@ def main():
     #print(min_10_with_all_columns)
     #min_filename = f'MIN_{YEAR}_{random_str}.csv'
     #min_10_with_all_columns.to_csv(min_filename, index=False)
-    
+    #cyber attacks--------------------------------------------------------------------------------------------------------------
     # Read the Excel file
     df = pd.read_excel('Cyber Events Database - 2014-2024 + Jan_Aug_Sept 2025.xlsx', sheet_name='Sheet 1')
+    
+    attacks2 = pd.read_excel('eurepoc.xlsx', sheet_name='Sheet1')
+    
 
     # Convert event_date to datetime if it's not already
     df['event_date'] = pd.to_datetime(df['event_date'], format='%d-%m-%Y').dt.date
-
+    attacks2['start_date'] = pd.to_datetime(attacks2['start_date'], format='%Y-%m-%d').dt.date
+    
+    
     # Aggregate by the specified columns and concatenate descriptions
     aggregated_df = df.groupby(['event_date', 'motive', 'event_type', 'country', 'actor_country']).agg({
         'description': lambda x: ' | '.join(x.astype(str)),
         'slug': 'count'  # Count number of events in each group
     }).reset_index()
-
+    
+    aggregated_df2 = attacks2.groupby(['start_date','incident_type', 'receiver_country', 'initiator_country']).agg({
+        'name': lambda x: ' | '.join(x.astype(str)),
+        'ID': 'count'  # Count number of events in each group
+    }).reset_index()
+    #aggregated_df2.to_excel("test.xlsx", index=False)
+    #print(aggregated_df2['receiver_country'])
     # Rename the count column
     aggregated_df = aggregated_df.rename(columns={'slug': 'event_count'})
-    #print(aggregated_df)
+    aggregated_df2 = aggregated_df2.rename(columns={'ID': 'event_count'})
+    aggregated_df2 = aggregated_df2.rename(columns={'start_date': 'event_date'})
+    #paggregated_df = aggregated_df.rename(columns={'slug': 'event_count'})rint(aggregated_df)
     # Display the aggregated data
     #print(aggregated_df.head())
     print(f"\nTotal aggregated events: {len(aggregated_df)}")
@@ -658,11 +671,335 @@ def main():
         return manual_map.get(country_name, None)
     attacks=pd.DataFrame()
     aggregated_df['country_fips'] = aggregated_df['country'].apply(country_to_fips)
+    
+    import country_converter as coco
+
+    def batch_country_to_fips(df, country_column):
+        """
+        Convert country names to FIPS codes in batch
+        """
+        # Get unique countries
+        unique_countries = df[country_column].unique()
+        
+        # Convert using country_converter
+        fips_mapping = dict(zip(
+            unique_countries, 
+            coco.convert(names=unique_countries.tolist(), to='ISO2')
+        ))
+        
+        # Map back to dataframe
+        df['fips_code'] = df[country_column].map(fips_mapping)
+        return df
+
+# Usage
+    
+    
+
+    #aggregated_df.loc[aggregated_df["actor_country_fips"] == "CO", "actor_country_fips"] = "CS"
+
+    
+    country_to_fips_list={
+        'afghanistan': 'AF',
+        'albania': 'AL',
+        'algeria': 'DZ',
+        'andorra': 'AD',
+        'angola': 'AO',
+        'antigua and barbuda': 'AG',
+        'argentina': 'AR',
+        'armenia': 'AM',
+        'australia': 'AU',
+        'austria': 'AT',
+        'azerbaijan': 'AZ',
+        'bahamas': 'BS',
+        'bahrain': 'BH',
+        'bangladesh': 'BD',
+        'barbados': 'BB',
+        'belarus': 'BO',
+        'belgium': 'BE',
+        'belize': 'BZ',
+        'benin': 'BJ',
+        'bhutan': 'BT',
+        'bolivia': 'BV',
+        'bosnia and herzegovina': 'BA',
+        'botswana': 'BW',
+        'brazil': 'BR',
+        'brunei': 'BN',
+        'bulgaria': 'BU',
+        'burkina faso': 'BF',
+        'burundi': 'BI',
+        'cabo verde': 'CV',
+        'cambodia': 'KH',
+        'cameroon': 'CM',
+        'canada': 'CA',
+        'central african republic': 'CF',
+        'chad': 'TD',
+        'chile': 'CL',
+        'china': 'CH',
+        'colombia': 'CO',
+        'comoros': 'KM',
+        'congo': 'CG',
+        'costa rica': 'CR',
+        "cote d'ivoire": 'CI',
+        'croatia': 'HR',
+        'cuba': 'CU',
+        'cyprus': 'CY',
+        'czech republic': 'CZ',
+        'denmark': 'DK',
+        'djibouti': 'DJ',
+        'dominica': 'DM',
+        'dominican republic': 'DO',
+        'ecuador': 'EC',
+        'egypt': 'EG',
+        'el salvador': 'SV',
+        'equatorial guinea': 'GQ',
+        'eritrea': 'ER',
+        'estonia': 'EE',
+        'eswatini': 'SZ',
+        'ethiopia': 'ET',
+        'fiji': 'FJ',
+        'finland': 'FI',
+        'france': 'FR',
+        'gabon': 'GA',
+        'gambia': 'GM',
+        'georgia': 'GE',
+        'germany': 'DE',
+        'ghana': 'GH',
+        'greece': 'GR',
+        'grenada': 'GD',
+        'guatemala': 'GT',
+        'guinea': 'GN',
+        'guinea-bissau': 'GW',
+        'guyana': 'GY',
+        'haiti': 'HT',
+        'honduras': 'HN',
+        'hungary': 'HU',
+        'iceland': 'IC',
+        'india': 'IN',
+        'indonesia': 'ID',
+        'iran': 'IR',
+        'iraq': 'IQ',
+        'ireland': 'IE',
+        'israel': 'IS',
+        'italy': 'IT',
+        'jamaica': 'JM',
+        'japan': 'JP',
+        'jordan': 'JO',
+        'kazakhstan': 'KZ',
+        'kenya': 'KE',
+        'kiribati': 'KI',
+        'korea, north': 'KP',
+        'korea, south': 'KR',
+        'kosovo': 'XK',
+        'kuwait': 'KW',
+        'kyrgyzstan': 'KG',
+        'laos': 'LA',
+        'latvia': 'LV',
+        'lebanon': 'LE',
+        'lesotho': 'LS',
+        'liberia': 'LR',
+        'libya': 'LY',
+        'liechtenstein': 'LI',
+        'lithuania': 'LT',
+        'luxembourg': 'LU',
+        'madagascar': 'MG',
+        'malawi': 'MW',
+        'malaysia': 'MY',
+        'maldives': 'MV',
+        'mali': 'ML',
+        'malta': 'MT',
+        'marshall islands': 'MH',
+        'mauritania': 'MR',
+        'mauritius': 'MU',
+        'mexico': 'MX',
+        'micronesia': 'FM',
+        'moldova': 'MD',
+        'monaco': 'MC',
+        'mongolia': 'MN',
+        'montenegro': 'ME',
+        'morocco': 'MA',
+        'mozambique': 'MZ',
+        'myanmar': 'MM',
+        'namibia': 'NA',
+        'nauru': 'NR',
+        'nepal': 'NP',
+        'netherlands': 'NL',
+        'new zealand': 'NZ',
+        'nicaragua': 'NI',
+        'niger': 'NE',
+        'nigeria': 'NG',
+        'north macedonia': 'MK',
+        'norway': 'NO',
+        'oman': 'OM',
+        'pakistan': 'PAK',
+        'palau': 'PW',
+        'palestine': 'PS',
+        'panama': 'PA',
+        'papua new guinea': 'PG',
+        'paraguay': 'PY',
+        'peru': 'PE',
+        'philippines': 'PH',
+        'poland': 'PL',
+        'portugal': 'PT',
+        'qatar': 'QA',
+        'romania': 'RO',
+        'russia': 'RS',
+        'rwanda': 'RW',
+        'saint kitts and nevis': 'KN',
+        'saint lucia': 'LC',
+        'saint vincent and the grenadines': 'VC',
+        'samoa': 'WS',
+        'san marino': 'SM',
+        'sao tome and principe': 'ST',
+        'saudi arabia': 'SA',
+        'senegal': 'SN',
+        'serbia': 'RS',
+        'seychelles': 'SC',
+        'sierra leone': 'SL',
+        'singapore': 'SG',
+        'slovakia': 'SK',
+        'slovenia': 'SI',
+        'solomon islands': 'SB',
+        'somalia': 'SO',
+        'south africa': 'ZA',
+        'south sudan': 'SS',
+        'spain': 'ES',
+        'sri lanka': 'LK',
+        'sudan': 'SD',
+        'suriname': 'SR',
+        'sweden': 'SE',
+        'switzerland': 'SUI',
+        'syria': 'SY',
+        'taiwan': 'TW',
+        'tajikistan': 'TJ',
+        'tanzania': 'TZ',
+        'thailand': 'TH',
+        'timor-leste': 'TL',
+        'togo': 'TG',
+        'tonga': 'TO',
+        'trinidad and tobago': 'TT',
+        'tunisia': 'TN',
+        'turkey': 'TR',
+        'turkmenistan': 'TM',
+        'tuvalu': 'TV',
+        'uganda': 'UG',
+        'ukraine': 'UA',
+        'united arab emirates': 'TC',
+        'united kingdom': 'GB',
+        'united states': 'US',
+        'uruguay': 'UY',
+        'uzbekistan': 'UZ',
+        'vanuatu': 'VU',
+        'vatican city': 'VA',
+        'venezuela': 'VE',
+        'vietnam': 'VM',
+        'yemen': 'YE',
+        'zambia': 'ZM',
+        'zimbabwe': 'ZW',
+        'usa': 'US',
+        'united states of america': 'US',
+        'uk': 'GB',
+        'great britain': 'GB',
+        'england': 'GB',
+        'scotland': 'GB',
+        'wales': 'GB',
+        'northern ireland': 'GB',
+        'republic of ireland': 'IE',
+        'south korea': 'KR',
+        'north korea': 'KP',
+        'democratic republic of congo': 'CD',
+        'drc': 'CD',
+        'congo-kinshasa': 'CD',
+        'congo-brazzaville': 'CG',
+        'republic of congo': 'CG',
+        'ivory coast': 'CI',
+        'czechia': 'CZ',
+        'macau': 'MO',
+        'hong kong': 'HK',
+        'burma': 'MM',
+        "NATO (institutions)": focal_country,
+        "Europe (region)": focal_country,
+        "NATO (region)": focal_country,
+        "EU (region)": focal_country,
+                    'United States of America': 'US',
+            'United Kingdom of Great Britain and Northern Ireland': 'UK',
+            'Russian Federation': 'RS',
+            'Korea (the Republic of)': 'KR',
+            'Iran (Islamic Republic of)': 'IR',
+            'Iran, Islamic Republic of': 'IR',
+            
+            'Venezuela (Bolivarian Republic of)': 'VE',
+            'Syrian Arab Republic': 'SY',
+            'Czechia': 'CZ',
+            'Undetermined': 'XX',
+            'Moldova (the Republic of)': 'MD',
+            'China': 'CH',
+            'Turkey': 'TU',
+            'Taiwan (Province of China)': 'TW',
+            'Holy See': 'VT',
+            'Holy See (Vatican City State)': 'VT',
+            'Korea (the Democratic People\'s Republic of)': 'KN',
+            'Bolivia (Plurinational State of)': 'BL',
+            'European Union': 'EU',
+            'Sint Maarten':'NL',
+            'Republic of North Macedonia': 'MK',
+            'Lebanon': 'LE',
+            'Kosovo': 'KS',
+            'Macau': 'CH',
+            'Saint Thomas': 'US',
+            'Vietnam': 'VM',
+            'Kazakstan': 'KZ'
+        ,
+    }
+
+
+    # METHOD 1: Using apply with a function
+    def get_fips_code(country_name):
+        if pd.isna(country_name):
+            return None
+        # Convert to lowercase and get first country if semicolon separated
+        country_str = str(country_name).lower().strip()
+        if ';' in country_str:
+            first_country = country_str.split(';')[0].strip()
+            return country_to_fips_list.get(first_country, None)
+        else:
+            return country_to_fips_list.get(country_str, None)
+
+# Apply the function to your column
+
+    #aggregated_df['country_fips'] = aggregated_df['country'].apply(country_to_fips)
+    aggregated_df2['receiver_country'] = aggregated_df2['receiver_country'].str.split(';').str[0]
+    aggregated_df2['country_fips'] = aggregated_df2['receiver_country'].apply(get_fips_code)
+
+
+    
+
+    
+
+    
     aggregated_df['actor_country_fips'] = aggregated_df['actor_country'].apply(country_to_fips)
+    
+    aggregated_df2['initiator_country'] = aggregated_df2['initiator_country'].str.split(';').str[0]
+    aggregated_df2['actor_country_fips'] = aggregated_df2['initiator_country'].apply(get_fips_code)
+    
+    
+
+
+
     aggregated_df.loc[aggregated_df["actor_country_fips"] == "CN", "actor_country_fips"] = "CH"
     aggregated_df.loc[aggregated_df["actor_country_fips"] == "RU", "actor_country_fips"] = "RS"
     aggregated_df.loc[aggregated_df["actor_country_fips"] == "NG", "actor_country_fips"] = "NI"
     aggregated_df.loc[aggregated_df["actor_country_fips"] == "CO", "actor_country_fips"] = "CS"
+    aggregated_df.loc[aggregated_df["actor_country_fips"] == "BG", "actor_country_fips"] = "BU"
+    aggregated_df.loc[aggregated_df["actor_country_fips"] == "BY", "actor_country_fips"] = "BO"
+    aggregated_df.loc[aggregated_df["actor_country_fips"] == "AE", "actor_country_fips"] = "TC"
+    aggregated_df.loc[aggregated_df["actor_country_fips"] == "LB", "actor_country_fips"] = "LE"
+    aggregated_df.loc[aggregated_df["actor_country_fips"] == "VN", "actor_country_fips"] = "VM"
+    
+    aggregated_df2.to_excel("test.xlsx", index=False)
+
+    
+    
+
     #filter focal countries
     attacksfilter1=False
     attacksfilter2=False
@@ -682,6 +1019,7 @@ def main():
         attacksfilter2 |= (aggregated_df['actor_country_fips'] == counterpart)
     #filter counterparts to remove in case of all countries!!###########################################################
     
+
     #attacks = aggregated_df[attacksfilter2].copy()
 
     
@@ -730,9 +1068,11 @@ def main():
     #dailyscores OK
     attackname=f'cyberevents_{focal_country}.xlsx'
     attacks.to_excel(attackname, index=False)
-   # df = pd.read_excel('GLOB_UK.xlsx', sheet_name='Sheet1')
 
+    
 
+    
+    
 # Run the sequential analysis
 if __name__ == "__main__":
     try:
