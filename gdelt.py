@@ -357,15 +357,15 @@ def main():
                 if len(df_filtered) > 0:
 #######################print(EVENT_CODES)####################################################################################EVENT CODE FILTERING#######################################################################################################
                     #print(df_filtered)
-                    #df_filtered=df_filtered[df_filtered["EventCode"].astype(str).isin(EVENT_CODES)]
+                    df_filtered=df_filtered[df_filtered["EventCode"].astype(str).isin(EVENT_CODES)]
                     #print("EVENT CODES USED")
-                    #root="speecific 10and more"
+                    root="speecific 10and more"
                     #rootcode filter
                     #df_filtered=df_filtered[df_filtered["EventRootCode"].astype(str).isin(EVENT_ROOTCODES)]
                     #print("ROOT CODES USED")
                     #root="newroot"
                     #df_filtered=df_filtered[df_filtered['Actor2Geo_CountryCode'].replace("", focal_country)]
-                    root="all"
+                    #root="all"
 
                     #print(len(df_filtered))
                     if len(df_filtered) > 0:
@@ -446,13 +446,13 @@ def main():
 
         before_filter = len(combined_df)
 #######COUNTERPARTFILTER#################################ignored counterpart filter###################################################################################################################################
-        combined_df = combined_df[counterpart_filter].copy()
-        cps="counterparts enhanced"
-        print("COUNTERPART FILTER")
+        #combined_df = combined_df[counterpart_filter].copy()
+        #cps="counterparts enhanced"
+        #print("COUNTERPART FILTER")
         #cps="RSCN"
         
         #print("NO COUNTERPART FILTER  -ALL COUNTRIES USED")
-        #cps="all"
+        cps="all"
         
         print(f"✓ Filtered to {len(combined_df):,} events (from {before_filter:,})")
         
@@ -984,18 +984,34 @@ def main():
 
     #daily_scores = daily_scores.drop(columns=["SQLDATE", "MonthYear","Year","ActionGeo_FeatureID","FractionDate","Actor1Geo_ADM1Code", "Actor1Geo_ADM2Code", "Actor1Geo_Lat","Actor1Geo_Long","Actor2Geo_ADM1Code", "Actor2Geo_ADM2Code", "Actor2Geo_Lat","Actor2Geo_Long"])
     daily_scores = daily_scores.drop(columns=["SOURCEURL"])
-
-
-    print(f"Daily scores records: {len(daily_scores)}")
     mergedname=f'aggregated_cyber_events_{YEAR}_{focal_country}_{root}_{cps}_{random_str}.xlsx'
-    #print(f"Merged records with cyber events: {merged_df[merged_df['event_count'].notna()].shape[0]}")
-    daily_scores.to_excel(mergedname, index=False)
+    mergedname2=f'aggregatedADD_cyber_events_{YEAR}_{focal_country}_{root}_{cps}_{random_str}.xlsx'
+    mergedname3=f'aggregatedADD2_cyber_events_{YEAR}_{focal_country}_{root}_{cps}_{random_str}.xlsx'
+
+    if len(daily_scores)>999000:
+        # splitting dataframe by row index
+        df1 = daily_scores.iloc[:999000,:]
+        df2 = daily_scores.iloc[999000:1999000,:]
+        df3 = daily_scores.iloc[1999000:,:]
+        print(f"Daily scores records: {len(daily_scores)}")
+    
+
+        
+        #print(f"Merged records with cyber events: {merged_df[merged_df['event_count'].notna()].shape[0]}")
+        df1.to_excel(mergedname, index=False)
+        df2.to_excel(mergedname2, index=False)
+        df3.to_excel(mergedname3, index=False)
+    else:
+        print(f"Daily scores records: {len(daily_scores)}")
+        daily_scores.to_excel(mergedname, index=False)
+        
+        
     #dailyscores OK
     attackname=f'cyberevents_{focal_country}.xlsx'
     attacks.to_excel(attackname, index=False)
 
     
-
+    
     
     
 # Run the sequential analysis
