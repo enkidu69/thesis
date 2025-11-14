@@ -102,29 +102,6 @@ print(f"Final DataFrame shape: {concatenated_df.shape}")
 df=concatenated_df
 
 
-
-"""
-Standalone script to train alert models (using 28-day moving average) and produce
-D+1, D+3, D+7 alerts + verification and metrics. Flattened runtime version (no user functions).
-This file:
- - trains models (LogisticRegression, RandomForest, optionally XGBoost)
- - applies models to post-train dates (or all dates if configured)
- - computes alerts and verification (TP/FP/FN/TN/TN) and persists outputs
- - computes alert efficiency and business metrics only on test data (post-train)
- - marks for each test row whether the event (1D/3D/7D) was anticipated by at least one Tier1 alert
-   according to a conservative lookback definition.
-How to use:
- - Edit the CONFIGURATION section to point to your input files or to set DataFrame variables.
- - Run: python testpred.py
- - Outputs (models, CSVs, pickles, metrics) are written to OUT_DIR (default 'outputs').
-Notes:
- - Uses sklearn.clone to ensure each trained model is an independent estimator.
- - Aggregates Daily_AvgTone per day with mean (not sum).
- - Does NOT fill tone NaNs prior to rolling MA to preserve variance.
- - Anticipation logic: for 1D, checks the same prediction row; for 3D/7D, checks whether any Tier1 alert
-   of the corresponding horizon occurred in the lookback window prior to the earliest possible event day (conservative).
-"""
-
 import os
 import pickle
 from datetime import datetime
@@ -526,17 +503,16 @@ attacks = attacks.sort_values("event_date").reset_index(drop=True)
 #Negativity_Score 0.62
 window = min(28, len(df))
 #calculate zscore for new dataset
-df['Tone_Article_Index'] = df['AvgTone']* df['NumArticles']#*df['GoldsteinScale']
-df['Tone_Article_Rolling_Mean'] = df['Tone_Article_Index'].rolling(window, min_periods=0).mean()
+df['Tone_Article_Index'] =df['AvgTone']#df['NumArticles']df['Daily_Goldstein']            ##*df['GoldsteinScale']
+df['Tone_Article_Rolling_Mean'] = df['Tone_Article_Index'].rolling(window, min_periods=0).median()
 df['Tone_Article_Rolling_Std'] = df['Tone_Article_Index'].rolling(window, min_periods=0).std()
 df['Tone_Article_ZScore'] = (df['Tone_Article_Index'] - df['Tone_Article_Rolling_Mean']) / df['Tone_Article_Rolling_Std']
 #df['Tone_Article_ZScore'] = df['GoldsteinScale']#*df['NumArticles']
-#df['Tone_Article_ZScore'] = df['AvgTone']*df['NumArticles']*df['GoldsteinScale']
+df['Tone_Article_ZScore'] = df['AvgTone']*df['NumArticles']#*df['GoldsteinScale']
 #df['Tone_Article_ZScore'] = df['Tone_Article_Rolling_Mean']
 
 
-# Aggregate CHANGED
-tone_daily = df.groupby("Date", as_index=False).agg({"Tone_Article_ZScore": "median"})
+tone_daily = df.groupby("Date", as_index=False).agg({"Tone_Article_ZScore": "mean"})
 attacks_daily = attacks.groupby("event_date", as_index=False).agg({"event_count": "sum"}).rename(
     columns={"event_date": "Date"}
 )
@@ -760,21 +736,23 @@ for target_col, horizon in targets:
                 f1 = precision_t = recall_t = 0.0
 
 # In the results summary section, ensure the threshold is included:
-            row.update(
-                {
-                    #"status": "ok",
-                    "opt_threshold": float(optimal_threshold),  # This should already be there
-                    #"auc": float(auc) if not np.isnan(auc) else None,
-                    "precision": float(precision_t),
-                    "recall": float(recall_t),
-                    "f1": float(f1),
-                    "TP": TP,
-                    "FP": FP,
-                    "FN": FN,
-                    "TN": TN,
-                    #"applied_threshold": float(optimal_threshold)  # Explicitly include
-                }
-            )
+            #printout only if precision is high enough
+            if float(precision_t)>0.55:
+                row.update(
+                    {
+                        #"status": "ok",
+                        "opt_threshold": float(optimal_threshold),  # This should already be there
+                        #"auc": float(auc) if not np.isnan(auc) else None,
+                        "precision": float(precision_t),
+                        "recall": float(recall_t),
+                        "f1": float(f1),
+                        "TP": TP,
+                        "FP": FP,
+                        "FN": FN,
+                        "TN": TN,
+                        #"applied_threshold": float(optimal_threshold)  # Explicitly include
+                    }
+                )
             print(f"  Final: TP={TP}, FP={FP}, FN={FN}, TN={TN}")
                   
             model_fname = f"model_{horizon.replace(' ','_')}_{model_name.replace(' ','_')}.pkl"
@@ -1106,25 +1084,26 @@ for horizon in trained_models.keys():
             print(f"\n{horizon.upper()} - {model_name} (Manual Threshold {TIER_THRESHOLD}):")
             print(f"  TP: {TP:3d} | FP: {FP:3d} | FN: {FN:3d} | TN: {TN:3d}")
             print(f"  Precision: {precision:.3f} | Recall: {recall:.3f} | F1: {f1:.3f}")
-            row = {
-                "model": model_name,
-                "horizon": horizon,
-                "train_n": len(y_train), 
-                "test_n": len(y_test),
-                "opt_threshold":TIER_THRESHOLD,
-                "precision": precision,
-                "recall": recall,
-                "f1": f1,
+            if precision>0.55:
+                row = {
+                    "model": model_name,
+                    "horizon": horizon,
+                    "train_n": len(y_train), 
+                    "test_n": len(y_test),
+                    "opt_threshold":TIER_THRESHOLD,
+                    "precision": precision,
+                    "recall": recall,
+                    "f1": f1,
 
-                "TP": TP,
-                "FP": FP,
-                "FN": FN,
-                "TN": TN
-                        
+                    "TP": TP,
+                    "FP": FP,
+                    "FN": FN,
+                    "TN": TN
+                            
 
 
-            }
-            results_summary_rows.append(row)
+                }
+                results_summary_rows.append(row)
 
 
 
