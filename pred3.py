@@ -63,7 +63,7 @@ def read_and_concatenate_excel_files():
     
     # Get all Excel files
     excel_files = glob.glob(os.path.join(folder_path, "aggregated*.xlsx")) + \
-                  glob.glob(os.path.join(folder_path, "aggregated*.xls"))
+                  glob.glob(os.path.join(folder_path, "singular*.xlsx"))
     
     if not excel_files:
         raise FileNotFoundError(f"No Excel files found in '{folder_path}'")
@@ -134,7 +134,7 @@ except Exception:
 TONE_CSV = None  # e.g. "data/aggregated_tone.csv"
 ATTACKS_CSV = None  # e.g. "data/cyberevents.csv" or .xlsx
 
-TRAIN_START = "2018-01-01"
+TRAIN_START = "2020-01-01"
 TRAIN_END = "2022-12-31"
 
 OUT_DIR = "analysis\\outputs"
@@ -503,16 +503,16 @@ attacks = attacks.sort_values("event_date").reset_index(drop=True)
 #Negativity_Score 0.62
 window = min(28, len(df))
 #calculate zscore for new dataset
-df['Tone_Article_Index'] =df['AvgTone']*df['NumArticles']*df['GoldsteinScale']            ##*df['GoldsteinScale']
-df['Tone_Article_Rolling_Mean'] = df['Tone_Article_Index'].rolling(window, min_periods=0).median()
+df['Tone_Article_Index'] =df['GoldsteinScale']#*df['NumArticles']*df['GoldsteinScale']            ##*
+df['Tone_Article_Rolling_Mean'] = df['Tone_Article_Index'].rolling(window, min_periods=0).mean()
 df['Tone_Article_Rolling_Std'] = df['Tone_Article_Index'].rolling(window, min_periods=0).std()
 df['Tone_Article_ZScore'] = (df['Tone_Article_Index'] - df['Tone_Article_Rolling_Mean']) / df['Tone_Article_Rolling_Std']
-df['Tone_Article_ZScore'] = df['GoldsteinScale']#df['AvgTone']#*df['NumArticles']*df['GoldsteinScale']
-#df['Tone_Article_ZScore'] = df['GoldsteinScale']#df['AvgTone']*df['NumArticles']*
+df['Tone_Article_ZScore'] = df['AvgTone']*df['NumArticles']#*df['GoldsteinScale']
+#df['Tone_Article_ZScore'] = df['GoldsteinScale']#df['AvgTone']*df['NumArticles']*df['AvgTone']*df['NumArticles']*
 #df['Tone_Article_ZScore'] = df['Tone_Article_Rolling_Mean']
 
 
-tone_daily = df.groupby("Date", as_index=False).agg({"Tone_Article_ZScore": "median"})
+tone_daily = df.groupby("Date", as_index=False).agg({"Tone_Article_ZScore": "mean"})
 attacks_daily = attacks.groupby("event_date", as_index=False).agg({"event_count": "sum"}).rename(
     columns={"event_date": "Date"}
 )

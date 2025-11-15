@@ -128,12 +128,12 @@ def download_gdelt_data_direct():
     temp_dir = 'temp_data_direct'
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
-    syear=2018
+    syear=2020
     start_month=1
     start_day=1
-    eyear=2025
-    end_month=9
-    end_day=30
+    eyear=2020
+    end_month=1
+    end_day=1
     start_date = datetime(syear, start_month, start_day)
     end_date = datetime(eyear, end_month, end_day)
     current_date = start_date
@@ -231,7 +231,7 @@ def main():
     
     # Fixed parameters
     YEAR = syear  # Using 2024 for actual data
-    FOCAL_COUNTRIES = ['UK']  # Countries we're analyzing
+    FOCAL_COUNTRIES = ['SP']  # Countries we're analyzing
 #############################################################################################COUNTRY
     EVENT_ROOTCODES= ['10','11','12','13','14','15','16','17','18','19','20']
     #EVENT_ROOTCODES= ['13','15','16','17','18','19','20']
@@ -357,13 +357,13 @@ def main():
                 if len(df_filtered) > 0:
 #######################print(EVENT_CODES)####################################################################################EVENT CODE FILTERING#######################################################################################################
                     #print(df_filtered)
-                    df_filtered=df_filtered[df_filtered["EventCode"].astype(str).isin(EVENT_CODES)]
+                    #df_filtered=df_filtered[df_filtered["EventCode"].astype(str).isin(EVENT_CODES)]
                     #print("EVENT CODES USED")
-                    root="speecific 10and more"
+                    #root="speecific 10and more"
                     #rootcode filter
-                    #df_filtered=df_filtered[df_filtered["EventRootCode"].astype(str).isin(EVENT_ROOTCODES)]
+                    df_filtered=df_filtered[df_filtered["EventRootCode"].astype(str).isin(EVENT_ROOTCODES)]
                     #print("ROOT CODES USED")
-                    #root="newroot"
+                    root="root"
                     #df_filtered=df_filtered[df_filtered['Actor2Geo_CountryCode'].replace("", focal_country)]
                     #root="all"
 
@@ -446,13 +446,13 @@ def main():
 
         before_filter = len(combined_df)
 #######COUNTERPARTFILTER#################################ignored counterpart filter###################################################################################################################################
-        combined_df = combined_df[counterpart_filter].copy()
-        cps="counterparts enhanced"
+        #combined_df = combined_df[counterpart_filter].copy()
+        #cps="counterparts enhanced"
         #print("COUNTERPART FILTER")
         #cps="RSCN"
         
         #print("NO COUNTERPART FILTER  -ALL COUNTRIES USED")
-        #cps="all"
+        cps="all"
         
         print(f"✓ Filtered to {len(combined_df):,} events (from {before_filter:,})")
         
@@ -600,7 +600,8 @@ def main():
             'Macau': 'CH',
             'Saint Thomas': 'US',
             'Vietnam': 'VM',
-            'Kazakstan': 'KZ'
+            'Kazakstan': 'KZ',
+            'Spain': 'SP'
             
             
             
@@ -805,7 +806,7 @@ def main():
         'somalia': 'SO',
         'south africa': 'ZA',
         'south sudan': 'SS',
-        'spain': 'ES',
+        'spain': 'SP',
         'sri lanka': 'LK',
         'sudan': 'SD',
         'suriname': 'SR',
@@ -937,6 +938,9 @@ def main():
     aggregated_df.loc[aggregated_df["actor_country_fips"] == "AE", "actor_country_fips"] = "TC"
     aggregated_df.loc[aggregated_df["actor_country_fips"] == "LB", "actor_country_fips"] = "LE"
     aggregated_df.loc[aggregated_df["actor_country_fips"] == "VN", "actor_country_fips"] = "VM"
+    aggregated_df.loc[aggregated_df["actor_country_fips"] == "ES", "actor_country_fips"] = "SP"
+    aggregated_df.loc[aggregated_df["country_fips"] == "ES", "country_fips"] = "SP"
+
     
     aggregated_df2.to_excel("test.xlsx", index=False)
 
@@ -948,10 +952,12 @@ def main():
     attacksfilter2=False
     xx=False
     attacks=pd.DataFrame()
+    #print(aggregated_df)
     #filter by focal country
     for focal_country in FOCAL_COUNTRIES:
         attacksfilter1 |= (aggregated_df['country_fips'] == focal_country)
         aggregated_df1 = aggregated_df[attacksfilter1].copy()
+
         #replace XX with same country to track all of them
         aggregated_df1.loc[aggregated_df1["actor_country_fips"] == "XX", "actor_country_fips"] = focal_country
 
