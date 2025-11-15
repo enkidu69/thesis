@@ -82,7 +82,7 @@ def read_and_concatenate_excel_files():
 desk = os.getcwd()
 path = desk+ '\\analysis\\'
 files = glob.glob(path+'cyberevents*.xlsx')
-files2=glob.glob(path+'aggregated*.xlsx')
+files2=glob.glob(path+'*cyber_events*.xlsx')
 #print(files)
 
 for file in files:
@@ -503,16 +503,16 @@ attacks = attacks.sort_values("event_date").reset_index(drop=True)
 #Negativity_Score 0.62
 window = min(28, len(df))
 #calculate zscore for new dataset
-df['Tone_Article_Index'] =df['AvgTone']#df['NumArticles']df['Daily_Goldstein']            ##*df['GoldsteinScale']
+df['Tone_Article_Index'] =df['AvgTone']*df['NumArticles']*df['GoldsteinScale']            ##*df['GoldsteinScale']
 df['Tone_Article_Rolling_Mean'] = df['Tone_Article_Index'].rolling(window, min_periods=0).median()
 df['Tone_Article_Rolling_Std'] = df['Tone_Article_Index'].rolling(window, min_periods=0).std()
 df['Tone_Article_ZScore'] = (df['Tone_Article_Index'] - df['Tone_Article_Rolling_Mean']) / df['Tone_Article_Rolling_Std']
-#df['Tone_Article_ZScore'] = df['GoldsteinScale']#*df['NumArticles']
-df['Tone_Article_ZScore'] = df['AvgTone']*df['NumArticles']#*df['GoldsteinScale']
+df['Tone_Article_ZScore'] = df['GoldsteinScale']#df['AvgTone']#*df['NumArticles']*df['GoldsteinScale']
+#df['Tone_Article_ZScore'] = df['GoldsteinScale']#df['AvgTone']*df['NumArticles']*
 #df['Tone_Article_ZScore'] = df['Tone_Article_Rolling_Mean']
 
 
-tone_daily = df.groupby("Date", as_index=False).agg({"Tone_Article_ZScore": "mean"})
+tone_daily = df.groupby("Date", as_index=False).agg({"Tone_Article_ZScore": "median"})
 attacks_daily = attacks.groupby("event_date", as_index=False).agg({"event_count": "sum"}).rename(
     columns={"event_date": "Date"}
 )

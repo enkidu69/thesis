@@ -446,13 +446,13 @@ def main():
 
         before_filter = len(combined_df)
 #######COUNTERPARTFILTER#################################ignored counterpart filter###################################################################################################################################
-        #combined_df = combined_df[counterpart_filter].copy()
-        #cps="counterparts enhanced"
+        combined_df = combined_df[counterpart_filter].copy()
+        cps="counterparts enhanced"
         #print("COUNTERPART FILTER")
         #cps="RSCN"
         
         #print("NO COUNTERPART FILTER  -ALL COUNTRIES USED")
-        cps="all"
+        #cps="all"
         
         print(f"✓ Filtered to {len(combined_df):,} events (from {before_filter:,})")
         
@@ -984,9 +984,9 @@ def main():
 
     #daily_scores = daily_scores.drop(columns=["SQLDATE", "MonthYear","Year","ActionGeo_FeatureID","FractionDate","Actor1Geo_ADM1Code", "Actor1Geo_ADM2Code", "Actor1Geo_Lat","Actor1Geo_Long","Actor2Geo_ADM1Code", "Actor2Geo_ADM2Code", "Actor2Geo_Lat","Actor2Geo_Long"])
     daily_scores = daily_scores.drop(columns=["SOURCEURL"])
-    mergedname=f'aggregated_cyber_events_{YEAR}_{focal_country}_{root}_{cps}_{random_str}.xlsx'
-    mergedname2=f'aggregatedADD_cyber_events_{YEAR}_{focal_country}_{root}_{cps}_{random_str}.xlsx'
-    mergedname3=f'aggregatedADD2_cyber_events_{YEAR}_{focal_country}_{root}_{cps}_{random_str}.xlsx'
+    mergedname=f'singular_cyber_events_{YEAR}_{focal_country}_{root}_{cps}_{random_str}.xlsx'
+    mergedname2=f'singularADD_cyber_events_{YEAR}_{focal_country}_{root}_{cps}_{random_str}.xlsx'
+    mergedname3=f'singularADD2_cyber_events_{YEAR}_{focal_country}_{root}_{cps}_{random_str}.xlsx'
 
     if len(daily_scores)>999000:
         # splitting dataframe by row index
