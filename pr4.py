@@ -42,7 +42,7 @@ import seaborn as sns
 from scipy import stats
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
-from sklearn.metrics import mean_squared_error, r2_score, classification_report, confusion_matrix, precision_recall_curve, auc
+from sklearn.metrics import mean_squared_error, r2_score, classification_report, confusion_matrix, precision_recall_curve, auc, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import TimeSeriesSplit
 import xgboost as xgb
@@ -380,18 +380,28 @@ def read_and_concatenate_excel_files():
     return pd.concat(dataframes, ignore_index=True)
 
 desk = os.getcwd()
-path = desk+ '\\analysis\\'
-files = glob.glob(path+'cyberevents*.xlsx')
-files2=glob.glob(path+'*cyber_events*.xlsx')
+path = os.path.join(desk, 'analysis')
 
-for file in files:
-    attacks = pd.read_excel(str(file))
+# Robustly load attack data
+attack_files = glob.glob(os.path.join(path, 'cyberevents*.xlsx'))
+if not attack_files:
+    raise FileNotFoundError("No attack files matching 'cyberevents*.xlsx' were found.")
+attacks_list = [pd.read_excel(f) for f in attack_files]
+attacks = pd.concat(attacks_list, ignore_index=True)
 
-for file in files2:
-    name=str(file)
+# Robustly determine the run name from a related file
+name_files = glob.glob(os.path.join(path, '*cyber_events*.xlsx'))
+if name_files:
+    # Use the first matching file to derive the name
+    base_name = os.path.basename(name_files[0])
+    # Assuming format is 'PREFIX_cyber_events.xlsx', extract PREFIX
+    name = base_name.replace('_cyber_events.xlsx', '')
+else:
+    # Fallback if no naming file is found
+    name = "" # Keep original behavior of empty name if file not found
+    print("Warning: No '*_cyber_events.xlsx' file found to derive a run name.")
 
-name=name[58:-5]
-print(name)
+print(f"Determinated run name as: '{name}'")
 
 concatenated_df=read_and_concatenate_excel_files()
 
@@ -405,54 +415,83 @@ scenarios = {
     "AvgTone": "df['AvgTone']",
     "AvgTone_X_NumArticles": "df['AvgTone']*df['NumArticles']",
     "AvgTone_X_NumArticles_X_GoldsteinScale": "df['AvgTone']*df['NumArticles']*df['GoldsteinScale']",
-    "AvgTone_RollingMean": "df['AvgTone'].rolling(window, min_periods=0).mean()",
-    "GoldsteinScale_RollingMean": "df['GoldsteinScale'].rolling(window, min_periods=0).mean()",
-    "AvgTone_RollingMedian": "df['AvgTone'].rolling(window, min_periods=0).median()",
-    "GoldsteinScale_RollingMedian": "df['GoldsteinScale'].rolling(window, min_periods=0).median()",
+    "AvgTone_RollingMean": "df['AvgTone'].rolling(window, min_periods=1).mean()",
+    "GoldsteinScale_RollingMean": "df['GoldsteinScale'].rolling(window, min_periods=1).mean()",
+    "AvgTone_RollingMedian": "df['AvgTone'].rolling(window, min_periods=1).median()",
+    "GoldsteinScale_RollingMedian": "df['GoldsteinScale'].rolling(window, min_periods=1).median()",
+    "AvgTone_X_NumArticles_RollingMean": "(df['AvgTone']*df['NumArticles']).rolling(window, min_periods=1).mean()",
+    "AvgTone_X_NumArticles_RollingMedian": "(df['AvgTone']*df['NumArticles']).rolling(window, min_periods=1).median()",
+    "AvgTone_X_NumArticles_X_GoldsteinScale_RollingMean": "(df['AvgTone']*df['NumArticles']*df['GoldsteinScale']).rolling(window, min_periods=1).mean()",
+    "AvgTone_X_NumArticles_X_GoldsteinScale_RollingMedian": "(df['AvgTone']*df['NumArticles']*df['GoldsteinScale']).rolling(window, min_periods=1).median()"
+
 }
 
 aggregations = ["mean", "median", "sum"]
-
 all_results = []
 run_data_cache = {}
+
+# --- Pre-computation before the loop ---
+
+# 1. Process attacks data once
+attacks["event_date"] = pd.to_datetime(attacks["event_date"])
+attacks = attacks.sort_values("event_date").reset_index(drop=True)
+attacks_daily = attacks.groupby("event_date", as_index=False).agg({"event_count": "sum"}).rename(
+    columns={"event_date": "Date", "event_count": "Global_Event_Count_Sum"}
+)
+
+# 2. Process base df data once
+df["Date"] = pd.to_datetime(df["Date"])
+df = df.sort_values("Date").reset_index(drop=True)
+
+# 3. Create a complete date range DataFrame
+start_date = min(df["Date"].min(), attacks_daily["Date"].min())
+end_date = max(df["Date"].max(), attacks_daily["Date"].max())
+all_dates = pd.date_range(start=start_date, end=end_date, freq="D")
+base_daily_df = pd.DataFrame({"Date": all_dates})
+
+# 4. Merge attack data and create event-based features
+base_daily_df = base_daily_df.merge(attacks_daily, on="Date", how="outer")
+base_daily_df["Global_Event_Count_Sum"] = base_daily_df["Global_Event_Count_Sum"].fillna(0)
+base_daily_df["Event_Occurred"] = (base_daily_df["Global_Event_Count_Sum"] > 0).astype(int)
+
+# Sort once before creating lags/leads
+base_daily_df = base_daily_df.sort_values("Date").reset_index(drop=True)
+
+# Create event-based features that don't depend on tone
+base_daily_df["Event_Lag_1"] = base_daily_df["Event_Occurred"].shift(1)
+base_daily_df["Event_Lag_3"] = base_daily_df["Event_Occurred"].shift(3)
+base_daily_df["Event_Lag_7"] = base_daily_df["Event_Occurred"].shift(7)
+base_daily_df["Event_Next_1D"] = base_daily_df["Event_Occurred"].shift(-1).fillna(0).astype(int)
+e1 = base_daily_df["Event_Occurred"].shift(-1).fillna(0).astype(int)
+e2 = base_daily_df["Event_Occurred"].shift(-2).fillna(0).astype(int)
+e3 = base_daily_df["Event_Occurred"].shift(-3).fillna(0).astype(int)
+e4 = base_daily_df["Event_Occurred"].shift(-4).fillna(0).astype(int)
+e5 = base_daily_df["Event_Occurred"].shift(-5).fillna(0).astype(int)
+e6 = base_daily_df["Event_Occurred"].shift(-6).fillna(0).astype(int)
+e7 = base_daily_df["Event_Occurred"].shift(-7).fillna(0).astype(int)
+base_daily_df["Event_Next_3D"] = ((e1 + e2 + e3) > 0).astype(int)
+base_daily_df["Event_Next_7D"] = ((e1 + e2 + e3 + e4 + e5 + e6 + e7) > 0).astype(int)
+
+# Create date-based features
+base_daily_df["Day_of_Week"] = base_daily_df["Date"].dt.dayofweek
+base_daily_df["Month"] = base_daily_df["Date"].dt.month
+base_daily_df["Quarter"] = base_daily_df["Date"].dt.quarter
+
 
 for scenario_name, scenario_formula in scenarios.items():
     for aggregation in aggregations:
         print(f"Running scenario: {scenario_name} with aggregation: {aggregation}")
         
-        # This is the former `run_analysis` function, now inlined
-        # -------------------------
-        # PREPARE DAILY SERIES
-        # -------------------------
-        df_copy = df.copy()
-        df_copy["Date"] = pd.to_datetime(df_copy["Date"])
-        df_copy = df_copy.sort_values("Date").reset_index(drop=True)
+        # --- Scenario-specific calculations ---
+        daily = base_daily_df.copy()
+        df_scenario = df.copy()
+        window = min(28, len(df_scenario))
+        df_scenario['Tone_Article_ZScore'] = eval(scenario_formula, {'df': df_scenario, 'window': window})
 
-        attacks_copy = attacks.copy()
-        attacks_copy["event_date"] = pd.to_datetime(attacks_copy["event_date"])
-        attacks_copy = attacks_copy.sort_values("event_date").reset_index(drop=True)
-
-        window = min(28, len(df_copy))
-
-        df_copy['Tone_Article_ZScore'] = eval(scenario_formula, {'df': df_copy, 'window': window})
-
-        tone_daily = df_copy.groupby("Date", as_index=False).agg({"Tone_Article_ZScore": aggregation})
-        attacks_daily = attacks_copy.groupby("event_date", as_index=False).agg({"event_count": "sum"}).rename(
-            columns={"event_date": "Date"}
-        )
-
-        start_date = min(tone_daily["Date"].min(), attacks_daily["Date"].min())
-        end_date = max(tone_daily["Date"].max(), attacks_daily["Date"].max())
-        all_dates = pd.date_range(start=start_date, end=end_date, freq="D")
-        daily = pd.DataFrame({"Date": all_dates})
-
+        tone_daily = df_scenario.groupby("Date", as_index=False).agg({"Tone_Article_ZScore": aggregation})
         daily = daily.merge(tone_daily.rename(columns={"Tone_Article_ZScore": "Global_Daily_AvgTone_Sum"}), on="Date", how="outer")
-        daily = daily.merge(attacks_daily.rename(columns={"event_count": "Global_Event_Count_Sum"}), on="Date", how="outer")
-
-        daily["Global_Event_Count_Sum"] = daily["Global_Event_Count_Sum"].fillna(0)
-        daily["Event_Occurred"] = (daily["Global_Event_Count_Sum"] > 0).astype(int)
         
-        daily = daily.sort_values("Date").reset_index(drop=True)
+        # --- Tone-dependent feature engineering ---
         daily["Tone_MA_28"] = daily["Global_Daily_AvgTone_Sum"].rolling(28, min_periods=1).mean()
         daily["Tone_MA_7"] = daily["Global_Daily_AvgTone_Sum"].rolling(7, min_periods=1).mean()
         daily["Tone_MA_14"] = daily["Global_Daily_AvgTone_Sum"].rolling(14, min_periods=1).mean()
@@ -463,24 +502,8 @@ for scenario_name, scenario_formula in scenarios.items():
         daily["Tone_Rolling_Min_7"] = daily["Global_Daily_AvgTone_Sum"].rolling(7, min_periods=1).min()
         daily["Tone_Rolling_Max_7"] = daily["Global_Daily_AvgTone_Sum"].rolling(7, min_periods=1).max()
         daily["Tone_Range_7"] = daily["Tone_Rolling_Max_7"] - daily["Tone_Rolling_Min_7"]
-        daily["Day_of_Week"] = daily["Date"].dt.dayofweek
-        daily["Month"] = daily["Date"].dt.month
-        daily["Quarter"] = daily["Date"].dt.quarter
         for lag in [1, 2, 3, 7]:
             daily[f"Tone_Lag_{lag}"] = daily["Tone_MA_28"].shift(lag)
-        daily["Event_Lag_1"] = daily["Event_Occurred"].shift(1)
-        daily["Event_Lag_3"] = daily["Event_Occurred"].shift(3)
-        daily["Event_Lag_7"] = daily["Event_Occurred"].shift(7)
-        daily["Event_Next_1D"] = daily["Event_Occurred"].shift(-1).fillna(0).astype(int)
-        e1 = daily["Event_Occurred"].shift(-1).fillna(0).astype(int)
-        e2 = daily["Event_Occurred"].shift(-2).fillna(0).astype(int)
-        e3 = daily["Event_Occurred"].shift(-3).fillna(0).astype(int)
-        e4 = daily["Event_Occurred"].shift(-4).fillna(0).astype(int)
-        e5 = daily["Event_Occurred"].shift(-5).fillna(0).astype(int)
-        e6 = daily["Event_Occurred"].shift(-6).fillna(0).astype(int)
-        e7 = daily["Event_Occurred"].shift(-7).fillna(0).astype(int)
-        daily["Event_Next_3D"] = ((e1 + e2 + e3) > 0).astype(int)
-        daily["Event_Next_7D"] = ((e1 + e2 + e3 + e4 + e5 + e6 + e7) > 0).astype(int)
 
         feature_cols = [
             "Global_Daily_AvgTone_Sum", "Tone_MA_28", "Tone_MA_7", "Tone_MA_14",
@@ -490,7 +513,7 @@ for scenario_name, scenario_formula in scenarios.items():
         ]
         daily_model = daily.dropna(subset=feature_cols).copy()
 
-        TRAIN_START = "2018-01-01"
+        TRAIN_START = "2020-01-01"
         TRAIN_END = "2022-12-31"
         train_start_dt = pd.to_datetime(TRAIN_START)
         train_end_dt = pd.to_datetime(TRAIN_END)
@@ -587,18 +610,28 @@ for scenario_name, scenario_formula in scenarios.items():
         run_data_cache[run_key] = {'trained_models': trained_models, 'test_df': test_df, 'feature_cols': feature_cols, 'daily': daily, 'train_end_dt': train_end_dt, 'daily_model': daily_model}
 
 results_df = pd.DataFrame(all_results)
-results_df['precision'] = pd.to_numeric(results_df['precision'], errors='coerce')
-results_df['f1'] = pd.to_numeric(results_df['f1'], errors='coerce')
-filtered_results_df = results_df[(results_df['precision'] > 0.55) | (results_df['f1'] > 0.55)].copy()
+if 'precision' in results_df.columns:
+    results_df['precision'] = pd.to_numeric(results_df['precision'], errors='coerce')
+if 'f1' in results_df.columns:
+    results_df['f1'] = pd.to_numeric(results_df['f1'], errors='coerce')
+
+if 'precision' in results_df.columns and 'f1' in results_df.columns:
+    filtered_results_df = results_df[(results_df['precision'] > 0.55) | (results_df['f1'] > 0.55)].copy()
+else:
+    filtered_results_df = pd.DataFrame()
 
 OUT_DIR = "analysis/outputs"
 ensure_dir(OUT_DIR)
-results_csv = os.path.join(OUT_DIR, name+"_detailed_results.xlsx")
+results_csv = os.path.join(OUT_DIR, f"detailed_results_{name}.xlsx")
 filtered_results_df.to_excel(results_csv, index=False)
 
 manual_threshold_results = []
-best_3day_model = results_df[results_df['horizon'] == '3-day'].nlargest(1, 'f1')
-best_7day_model = results_df[results_df['horizon'] == '7-day'].nlargest(1, 'f1')
+if 'f1' in results_df.columns and 'precision' in results_df.columns:
+    best_3day_model = results_df[results_df['horizon'] == '3-day'].nlargest(1, ['f1', 'precision'])
+    best_7day_model = results_df[results_df['horizon'] == '7-day'].nlargest(1, ['f1', 'precision'])
+else:
+    best_3day_model = pd.DataFrame()
+    best_7day_model = pd.DataFrame()
 
 best_models_to_run = []
 if not best_3day_model.empty:
@@ -616,5 +649,38 @@ for best_model_row in best_models_to_run:
 if manual_threshold_results:
     final_manual_results = pd.concat(manual_threshold_results, axis=1)
     final_manual_results = final_manual_results.loc[:,~final_manual_results.columns.duplicated()]
-    manual_results_csv = os.path.join(OUT_DIR, name+"_manual_threshold_results.xlsx")
+    manual_results_csv = os.path.join(OUT_DIR, f"manual_threshold_results_{name}.xlsx")
     final_manual_results.to_excel(manual_results_csv, index=False)
+
+    for best_model_row in best_models_to_run:
+        scenario = best_model_row['scenario']
+        aggregation = best_model_row['aggregation']
+        run_data = run_data_cache[(scenario, aggregation)]
+        horizon = best_model_row['horizon']
+        model_name = best_model_row['model']
+
+        if f"Manual_{horizon.replace('-','')}_{model_name.replace(' ', '_')}_Alert" in final_manual_results.columns:
+            y_true = run_data['test_df'][f"Event_Next_{horizon.split('-')[0]}D"]
+            y_pred = final_manual_results[f"Manual_{horizon.replace('-','')}_{model_name.replace(' ', '_')}_Alert"]
+            
+            report = classification_report(y_true, y_pred, output_dict=True, zero_division=0)
+            f1 = report.get("1", {}).get("f1-score", 0.0)
+            precision_t = report.get("1", {}).get("precision", 0.0)
+            recall_t = report.get("1", {}).get("recall", 0.0)
+            
+            all_results.append({
+                'scenario': scenario,
+                'aggregation': aggregation,
+                'horizon': horizon,
+                'model': f'{model_name} (Manual)',
+                'precision': precision_t,
+                'recall': recall_t,
+                'f1': f1,
+            })
+
+    results_df = pd.DataFrame(all_results)
+    results_df['precision'] = pd.to_numeric(results_df['precision'], errors='coerce')
+    results_df['f1'] = pd.to_numeric(results_df['f1'], errors='coerce')
+    filtered_results_df = results_df[(results_df['precision'] > 0.55) | (results_df['f1'] > 0.55)].copy()
+    results_csv = os.path.join(OUT_DIR, f"detailed_results_{name}.xlsx")
+    filtered_results_df.to_excel(results_csv, index=False)
