@@ -59,13 +59,16 @@ def apply_temporal_smoothing(probabilities, window=3):
     """Apply moving average smoothing to probabilities"""
     return pd.Series(probabilities).rolling(window=window, center=True, min_periods=1).mean().values
 
-def find_balanced_threshold(y_true, y_proba, balance_method="f1_precision", max_fp_tp_ratio=0.6):
+def find_balanced_threshold(y_true, y_proba, balance_method="tp_fp_diff", max_fp_tp_ratio=0.6):
     """
     Find optimal threshold ensuring:
     1. Precision, Recall, F1 > 0.5
-    2. FP / TP < 0.6
-    3. TP > 0 and TN > 0 (Must detect positives and negatives)
-    Maximizes the combined score (F1 + Precision) among valid thresholds.
+    2. FP / TP < 0.6 (Strict False Positive control)
+    3. TP >= 2 (Must detect at least 2 events)
+    4. TN > 0
+    
+    Optimization Target:
+    - Maximize (TP - FP)
     """
     precision_vals, recall_vals, thresholds = precision_recall_curve(y_true, y_proba)
     
@@ -84,12 +87,11 @@ def find_balanced_threshold(y_true, y_proba, balance_method="f1_precision", max_
         if prec <= 1e-8:
             continue
             
-        # --- DERIVE TP AND TN FOR CONSTRAINT CHECKING ---
+        # --- DERIVE TP AND FP FOR OPTIMIZATION ---
         # TP = Recall * Total Positives
         tp_est = rec * n_positives
         
         # FP = TP * (1/Precision - 1)
-        # Derived from: Precision = TP / (TP + FP)
         fp_est = tp_est * ((1.0 / prec) - 1.0)
         
         # TN = Total Negatives - FP
@@ -101,6 +103,9 @@ def find_balanced_threshold(y_true, y_proba, balance_method="f1_precision", max_
         # Calculate F1
         f1 = 2 * (prec * rec) / (prec + rec + 1e-8)
         
+        # Calculate Metric: Difference between TP and FP
+        tp_fp_diff = tp_est - fp_est
+        
         # --- STRICT CONSTRAINTS ---
         # 1. Base Metrics > 0.5
         if prec <= 0.5 or rec <= 0.5 or f1 <= 0.5:
@@ -110,9 +115,12 @@ def find_balanced_threshold(y_true, y_proba, balance_method="f1_precision", max_
         if fp_tp_ratio >= max_fp_tp_ratio:
             continue
             
-        # 3. TP > 0 and TN > 0
-        # We use > 0.5 to account for floating point inaccuracies, effectively ensuring >= 1 count
-        if tp_est < 0.5 or tn_est < 0.5:
+        # 3. TP >= 2 (New Constraint: Must have at least 2 TPs)
+        if tp_est < 2:
+            continue
+            
+        # 4. TN > 0 (Must reject at least one negative)
+        if tn_est < 0.5:
             continue
 
         # Metrics for selection strategies
@@ -125,6 +133,7 @@ def find_balanced_threshold(y_true, y_proba, balance_method="f1_precision", max_
             'recall': rec,
             'f1': f1,
             'fp_tp_ratio': fp_tp_ratio,
+            'tp_fp_diff': tp_fp_diff,
             'combined_score': combined_score,
             'geometric_mean': geometric_mean
         })
@@ -142,7 +151,10 @@ def find_balanced_threshold(y_true, y_proba, balance_method="f1_precision", max_
     # Convert to DataFrame for easier sorting
     viable_df = pd.DataFrame(viable_thresholds)
     
-    if balance_method == "f1_precision":
+    if balance_method == "tp_fp_diff":
+        # Strategy: Maximize (TP - FP)
+        best_row = viable_df.loc[viable_df['tp_fp_diff'].idxmax()]
+    elif balance_method == "f1_precision":
         # Strategy: Maximize (F1 + Precision)
         best_row = viable_df.loc[viable_df['combined_score'].idxmax()]
     else:
@@ -152,10 +164,11 @@ def find_balanced_threshold(y_true, y_proba, balance_method="f1_precision", max_
 
 def adaptive_threshold_optimization(y_true, y_proba, horizon):
     """
-    Adaptive threshold optimization that strictly enforces constraints.
+    Adaptive threshold optimization that strictly enforces constraints and 
+    optimizes for TP - FP difference.
     """
     threshold, precision, recall, f1 = find_balanced_threshold(
-        y_true, y_proba, balance_method="f1_precision", max_fp_tp_ratio=0.6
+        y_true, y_proba, balance_method="tp_fp_diff", max_fp_tp_ratio=0.6
     )
     return threshold, precision, recall, f1
 
@@ -443,7 +456,7 @@ for scenario_name, scenario_formula in scenarios.items():
                         y_proba = model_inst.predict_proba(X_test)[:, 1]
                         trained_obj = model_inst
 
-                    # --- UPDATED: ADAPTIVE THRESHOLD NOW ENFORCES ALL CONSTRAINTS ---
+                    # --- UPDATED: ADAPTIVE THRESHOLD NOW OPTIMIZES FOR TP - FP ---
                     optimal_threshold, best_precision, best_recall, best_f1 = adaptive_threshold_optimization(y_test, y_proba, horizon)
                     
                     y_proba_smoothed = apply_temporal_smoothing(y_proba, window=3)
