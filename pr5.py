@@ -59,16 +59,12 @@ def apply_temporal_smoothing(probabilities, window=3):
     """Apply moving average smoothing to probabilities"""
     return pd.Series(probabilities).rolling(window=window, center=True, min_periods=1).mean().values
 
-def find_balanced_threshold(y_true, y_proba, balance_method="tp_fp_diff", max_fp_tp_ratio=0.6):
+def find_balanced_threshold(y_true, y_proba, balance_method="combined_max", max_fp_tp_ratio=0.6):
     """
     Find optimal threshold ensuring:
     1. Precision, Recall, F1 > 0.5
-    2. FP / TP < 0.6 (Strict False Positive control)
-    3. TP >= 2 (Must detect at least 2 events)
-    4. TN > 0
-    
-    Optimization Target:
-    - Maximize (TP - FP)
+    2. TP, FP, FN, TN > 0 (No zero values in confusion matrix)
+    3. Optimizes for: Precision, F1, and (TP - FP)
     """
     precision_vals, recall_vals, thresholds = precision_recall_curve(y_true, y_proba)
     
@@ -76,71 +72,59 @@ def find_balanced_threshold(y_true, y_proba, balance_method="tp_fp_diff", max_fp
     precision_vals = precision_vals[:-1]
     recall_vals = recall_vals[:-1]
     
-    # Pre-calculate totals for deriving TP/TN inside loop
+    # Pre-calculate totals
     n_positives = y_true.sum()
     n_negatives = len(y_true) - n_positives
+    total_samples = len(y_true)
     
     viable_thresholds = []
     
     for i, (prec, rec, th) in enumerate(zip(precision_vals, recall_vals, thresholds)):
-        # Avoid division by zero
-        if prec <= 1e-8:
+        # Avoid division by zero in F1 calculation
+        if prec <= 1e-8 or rec <= 1e-8:
             continue
             
-        # --- DERIVE TP AND FP FOR OPTIMIZATION ---
-        # TP = Recall * Total Positives
+        # --- ESTIMATE CONFUSION MATRIX ---
         tp_est = rec * n_positives
-        
-        # FP = TP * (1/Precision - 1)
         fp_est = tp_est * ((1.0 / prec) - 1.0)
-        
-        # TN = Total Negatives - FP
+        fn_est = n_positives - tp_est
         tn_est = n_negatives - fp_est
-        
-        # Calculate FP/TP Ratio
-        fp_tp_ratio = (1.0 / prec) - 1.0
         
         # Calculate F1
         f1 = 2 * (prec * rec) / (prec + rec + 1e-8)
         
-        # Calculate Metric: Difference between TP and FP
-        tp_fp_diff = tp_est - fp_est
-        
         # --- STRICT CONSTRAINTS ---
-        # 1. Base Metrics > 0.5
-        if prec <= 0.5 or rec <= 0.5 or f1 <= 0.5:
+        
+        # 1. Base Quality: Precision & F1 > 0.5
+        if prec <= 0.5 or f1 <= 0.5:
             continue
             
-        # 2. FP/TP < 0.6
-        if fp_tp_ratio >= max_fp_tp_ratio:
+        # 2. Confusion Matrix Completeness: No Zeros Allowed
+        # We use < 0.5 to check for effective integer 0 given floating point estimates
+        if tp_est < 0.5 or fp_est < 0.5 or fn_est < 0.5 or tn_est < 0.5:
             continue
             
-        # 3. TP >= 2 (New Constraint: Must have at least 2 TPs)
-        if tp_est < 2:
-            continue
-            
-        # 4. TN > 0 (Must reject at least one negative)
-        if tn_est < 0.5:
-            continue
-
-        # Metrics for selection strategies
-        combined_score = f1 + prec
-        geometric_mean = np.sqrt(prec * rec)
+        # --- CALCULATE SCORES ---
+        
+        # Net Benefit (TP vs FP), normalized to -1 to 1 range
+        tp_fp_diff_norm = (tp_est - fp_est) / total_samples
+        
+        # Combined Score: Sum of F1, Precision, and Net Benefit
+        # This rewards high accuracy/precision while pushing for more TPs than FPs
+        combined_score = f1 + prec + tp_fp_diff_norm
         
         viable_thresholds.append({
             'threshold': th,
             'precision': prec,
             'recall': rec,
             'f1': f1,
-            'fp_tp_ratio': fp_tp_ratio,
-            'tp_fp_diff': tp_fp_diff,
-            'combined_score': combined_score,
-            'geometric_mean': geometric_mean
+            'tp': tp_est,
+            'fp': fp_est,
+            'combined_score': combined_score
         })
     
     if not viable_thresholds:
-        # Fallback if no threshold meets the strict criteria
-        # Default to Geometric Mean maximization to return safest available option
+        # Fallback: Use Geometric Mean if strict constraints fail
         geometric_mean_scores = np.sqrt(precision_vals * recall_vals)
         best_idx = np.argmax(geometric_mean_scores)
         if len(thresholds) > best_idx:
@@ -148,27 +132,20 @@ def find_balanced_threshold(y_true, y_proba, balance_method="tp_fp_diff", max_fp
         else:
             return 0.5, 0.0, 0.0, 0.0
     
-    # Convert to DataFrame for easier sorting
+    # Convert to DataFrame
     viable_df = pd.DataFrame(viable_thresholds)
     
-    if balance_method == "tp_fp_diff":
-        # Strategy: Maximize (TP - FP)
-        best_row = viable_df.loc[viable_df['tp_fp_diff'].idxmax()]
-    elif balance_method == "f1_precision":
-        # Strategy: Maximize (F1 + Precision)
-        best_row = viable_df.loc[viable_df['combined_score'].idxmax()]
-    else:
-        best_row = viable_df.loc[viable_df['f1'].idxmax()]
+    # Maximize the combined score
+    best_row = viable_df.loc[viable_df['combined_score'].idxmax()]
     
     return best_row['threshold'], best_row['precision'], best_row['recall'], best_row['f1']
 
 def adaptive_threshold_optimization(y_true, y_proba, horizon):
     """
-    Adaptive threshold optimization that strictly enforces constraints and 
-    optimizes for TP - FP difference.
+    Adaptive threshold optimization wrapper.
     """
     threshold, precision, recall, f1 = find_balanced_threshold(
-        y_true, y_proba, balance_method="tp_fp_diff", max_fp_tp_ratio=0.6
+        y_true, y_proba, balance_method="combined_max"
     )
     return threshold, precision, recall, f1
 
@@ -297,7 +274,13 @@ scenarios = {
     "AvgTone_X_NumArticles_RollingMean": "(df['AvgTone']*df['NumArticles']).rolling(window, min_periods=1).mean()",
     "AvgTone_X_NumArticles_RollingMedian": "(df['AvgTone']*df['NumArticles']).rolling(window, min_periods=1).median()",
     "AvgTone_X_NumArticles_X_GoldsteinScale_RollingMean": "(df['AvgTone']*df['NumArticles']*df['GoldsteinScale']).rolling(window, min_periods=1).mean()",
-    "AvgTone_X_NumArticles_X_GoldsteinScale_RollingMedian": "(df['AvgTone']*df['NumArticles']*df['GoldsteinScale']).rolling(window, min_periods=1).median()"
+    "AvgTone_X_NumArticles_X_GoldsteinScale_RollingMedian": "(df['AvgTone']*df['NumArticles']*df['GoldsteinScale']).rolling(window, min_periods=1).median()",
+    
+    # NEW Z-SCORE SCENARIOS
+    "GoldsteinScale_Zscore": "((df['GoldsteinScale'] - df['GoldsteinScale'].rolling(window, min_periods=1).mean()) / df['GoldsteinScale'].rolling(window, min_periods=1).std())",
+    "AvgTone_Zscore": "((df['AvgTone'] - df['AvgTone'].rolling(window, min_periods=1).mean()) / df['AvgTone'].rolling(window, min_periods=1).std())",
+    "AvgTone_X_NumArticles_Zscore": "((df['AvgTone']*df['NumArticles']) - (df['AvgTone']*df['NumArticles']).rolling(window, min_periods=1).mean()) / (df['AvgTone']*df['NumArticles']).rolling(window, min_periods=1).std()",
+    "AvgTone_X_NumArticles_X_GoldsteinScale_Zscore": "((df['AvgTone']*df['NumArticles']*df['GoldsteinScale']) - (df['AvgTone']*df['NumArticles']*df['GoldsteinScale']).rolling(window, min_periods=1).mean()) / (df['AvgTone']*df['NumArticles']*df['GoldsteinScale']).rolling(window, min_periods=1).std()"
 }
 
 aggregations = ["mean", "median", "sum"]
@@ -365,7 +348,12 @@ for scenario_name, scenario_formula in scenarios.items():
         daily = base_daily_df.copy()
         df_scenario = df.copy()
         window = min(28, len(df_scenario))
-        df_scenario['Tone_Article_ZScore'] = eval(scenario_formula, {'df': df_scenario, 'window': window})
+        
+        try:
+            df_scenario['Tone_Article_ZScore'] = eval(scenario_formula, {'df': df_scenario, 'window': window})
+        except Exception as e:
+            print(f"Skipping scenario {scenario_name} due to calculation error: {e}")
+            continue
 
         tone_daily = df_scenario.groupby("Date", as_index=False).agg({"Tone_Article_ZScore": aggregation})
         daily = daily.merge(tone_daily.rename(columns={"Tone_Article_ZScore": "Global_Daily_AvgTone_Sum"}), on="Date", how="outer")
@@ -456,7 +444,7 @@ for scenario_name, scenario_formula in scenarios.items():
                         y_proba = model_inst.predict_proba(X_test)[:, 1]
                         trained_obj = model_inst
 
-                    # --- UPDATED: ADAPTIVE THRESHOLD NOW OPTIMIZES FOR TP - FP ---
+                    # --- UPDATED: ADAPTIVE THRESHOLD NOW ENFORCES ALL CONSTRAINTS ---
                     optimal_threshold, best_precision, best_recall, best_f1 = adaptive_threshold_optimization(y_test, y_proba, horizon)
                     
                     y_proba_smoothed = apply_temporal_smoothing(y_proba, window=3)
