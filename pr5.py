@@ -276,7 +276,7 @@ scenarios = {
     "AvgTone_X_NumArticles_X_GoldsteinScale_RollingMean": "(df['AvgTone']*df['NumArticles']*df['GoldsteinScale']).rolling(window, min_periods=1).mean()",
     "AvgTone_X_NumArticles_X_GoldsteinScale_RollingMedian": "(df['AvgTone']*df['NumArticles']*df['GoldsteinScale']).rolling(window, min_periods=1).median()",
     
-    # NEW Z-SCORE SCENARIOS
+    # Z-SCORE SCENARIOS
     "GoldsteinScale_Zscore": "((df['GoldsteinScale'] - df['GoldsteinScale'].rolling(window, min_periods=1).mean()) / df['GoldsteinScale'].rolling(window, min_periods=1).std())",
     "AvgTone_Zscore": "((df['AvgTone'] - df['AvgTone'].rolling(window, min_periods=1).mean()) / df['AvgTone'].rolling(window, min_periods=1).std())",
     "AvgTone_X_NumArticles_Zscore": "((df['AvgTone']*df['NumArticles']) - (df['AvgTone']*df['NumArticles']).rolling(window, min_periods=1).mean()) / (df['AvgTone']*df['NumArticles']).rolling(window, min_periods=1).std()",
@@ -444,13 +444,17 @@ for scenario_name, scenario_formula in scenarios.items():
                         y_proba = model_inst.predict_proba(X_test)[:, 1]
                         trained_obj = model_inst
 
-                    # --- UPDATED: ADAPTIVE THRESHOLD NOW ENFORCES ALL CONSTRAINTS ---
+                    # --- OPTIMIZATION (Strict Constraints) ---
                     optimal_threshold, best_precision, best_recall, best_f1 = adaptive_threshold_optimization(y_test, y_proba, horizon)
                     
                     y_proba_smoothed = apply_temporal_smoothing(y_proba, window=3)
                     y_pred = (y_proba_smoothed >= optimal_threshold).astype(int)
                     TP, FP, FN, TN = calculate_confusion_matrix_metrics(y_test, y_pred)
                     
+                    # --- FIXED: CALCULATE ACCURACY % (Correct Predictions / Total) ---
+                    total_samples = TP + FP + FN + TN
+                    correct_error_ratio = (TP + TN) / (total_samples + 1e-10)
+
                     try:
                         auc_score = roc_auc_score(y_test, y_proba_smoothed)
                     except Exception:
@@ -472,6 +476,7 @@ for scenario_name, scenario_formula in scenarios.items():
                         "recall": float(recall_t), 
                         "f1": float(f1), 
                         "TP": TP, "FP": FP, "FN": FN, "TN": TN, 
+                        "Correct_Error_Ratio": float(correct_error_ratio),  # <--- UPDATED CALCULATION
                         "applied_threshold": float(optimal_threshold)
                     })
                     trained_models[horizon][model_name] = trained_obj
@@ -500,7 +505,7 @@ for scenario_name, scenario_formula in scenarios.items():
 # ==============================================================================
 
 results_df = pd.DataFrame(all_results)
-cols_to_numeric = ['precision', 'f1', 'recall', 'auc']
+cols_to_numeric = ['precision', 'f1', 'recall', 'auc', 'Correct_Error_Ratio']
 for col in cols_to_numeric:
     if col in results_df.columns:
         results_df[col] = pd.to_numeric(results_df[col], errors='coerce')
@@ -665,12 +670,16 @@ for key, run_data in run_data_cache.items():
                         prec = report.get("1", {}).get("precision", 0.0)
                         rec = report.get("1", {}).get("recall", 0.0)
                         
-                        # NEW: Calculate TP, FP, FN, TN for manual threshold
                         TP_m, FP_m, FN_m, TN_m = calculate_confusion_matrix_metrics(y_true, y_pred)
+                        
+                        # --- NEW: CALCULATE ACCURACY FOR MANUAL THRESHOLD ---
+                        total_m = TP_m + FP_m + FN_m + TN_m
+                        ratio_m = (TP_m + TN_m) / (total_m + 1e-10)
                         
                     except Exception:
                         f1 = prec = rec = 0.0
                         TP_m = FP_m = FN_m = TN_m = 0
+                        ratio_m = 0.0
                     
                     manual_metrics_rows.append({
                         'scenario': scenario_name,
@@ -686,6 +695,7 @@ for key, run_data in run_data_cache.items():
                         'FP': FP_m, 
                         'FN': FN_m, 
                         'TN': TN_m,
+                        'Correct_Error_Ratio': ratio_m,  # <--- UPDATED CALCULATION
                         'status': 'manual_ok'
                     })
 
