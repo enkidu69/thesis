@@ -446,13 +446,13 @@ def main():
 
         before_filter = len(combined_df)
 #######COUNTERPARTFILTER#################################ignored counterpart filter###################################################################################################################################
-        #combined_df = combined_df[counterpart_filter].copy()
+        combined_df = combined_df[counterpart_filter].copy()
         cps="counterparts enhanced"
         #print("COUNTERPART FILTER")
         #cps="RSCN"
         
         #print("NO COUNTERPART FILTER  -ALL COUNTRIES USED")
-        cps="all"
+        #cps="all"
         
         print(f"✓ Filtered to {len(combined_df):,} events (from {before_filter:,})")
         
@@ -1001,7 +1001,7 @@ def main():
         df1 = daily_scores.iloc[:999000,:]
         df2 = daily_scores.iloc[999000:1999000,:]
         df3 = daily_scores.iloc[1999000:2999000,:]
-        df3 = daily_scores.iloc[2999000:3999000,:]
+        df4 = daily_scores.iloc[2999000:3999000,:]
         print(f"Daily scores records: {len(daily_scores)}")
     
 
@@ -1010,7 +1010,7 @@ def main():
         df1.to_excel(mergedname, index=False)
         df2.to_excel(mergedname2, index=False)
         df3.to_excel(mergedname3, index=False)
-        df3.to_excel(mergedname4, index=False)
+        df4.to_excel(mergedname4, index=False)
 
     else:
         print(f"Daily scores records: {len(daily_scores)}")
