@@ -8,12 +8,12 @@ from datetime import datetime, timedelta
 
 # 1. PAGE CONFIGURATION
 st.set_page_config(
-    page_title="GDELT 2.0 Country Heat Map",
+    page_title="Geopolitical Conflict Heat Map",
     page_icon="🔥",
     layout="wide"
 )
 
-st.title("🔥 GDELT 2.0 Global Conflict Heat Map (By Country)")
+st.title("🔥 Geopolitical Global Conflict Heat Map (By Country)")
 st.markdown("""
 **Data Source:** Direct CSV Downloads from `data.gdeltproject.org`.
 **Logic:** Aggregating total negative impact ("Heat") by **Actor 2's Country Code**.
