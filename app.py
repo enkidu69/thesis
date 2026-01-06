@@ -28,9 +28,8 @@ if page == "Global Conflict Map":
     # Hide details in an expander for mobile cleanliness
     with st.expander("ℹ️ About this Map"):
         st.markdown("""
-        **Logic:** Aggregating negative impact by **Actor 2's Country Code**.
-        **Location:** Coordinates are determined strictly by a **static lookup of the Country Code**.
-        **Filters:** Event Codes, Negative Tone, Deduplicated URLs.
+        **Welcome!** This website provides a proof of concept for the usage of GDELT data for geopolitical analysis. News data from the past 12 to 72 hours are fetched including only conflictual news, classified by related country and their counterparts, flagged with a score calculated multiplying diffusion, tone and gravity of the conflictual article. The URLs of retrieved articles can be checked from the **Events** table.
+        The **Keyword News Search** enables searching of specific mentions within the news of the past 3 months, providing a list of relevant links. Enjoy your conflicts!
         """)
 
     # --- STATIC DATA: FIPS 10-4 Country Centroids ---
@@ -210,7 +209,7 @@ if page == "Global Conflict Map":
         st.divider()
 
         # 2. DATA TABLES (Mobile optimized)
-        tab1, tab2 = st.tabs(["🔥 Top Targets", "📂 Raw Events"])
+        tab1, tab2 = st.tabs(["🔥 Top Targets", "📂 Events"])
         
         with tab1:
             if not country_df.empty:
