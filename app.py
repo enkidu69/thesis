@@ -28,7 +28,6 @@ st.markdown("""
 <style>
     .main { padding-top: 1rem; }
     h1 { color: #2c3e50; font-family: 'Helvetica Neue', sans-serif; font-size: 2.2rem; }
-    h2 { color: #34495e; font-size: 1.5rem; margin-top: 2rem; }
     
     /* DATAFRAME TEXT WRAPPING FIX */
     div[data-testid="stDataFrame"] div[role="grid"] div[role="row"] div[role="gridcell"] {
@@ -41,17 +40,17 @@ st.markdown("""
         padding-bottom: 10px !important;
     }
     
-    /* Button Height Alignment */
+    /* Button Alignment */
     div.stButton > button {
         height: 2.6rem; 
         width: 100%;
         border-radius: 6px;
     }
     
-    /* Hide Footer/Banner */
-    footer {visibility: hidden;}
+    /* REMOVE FOOTER & WHITESPACE */
+    footer {display: none !important;}
     header {visibility: hidden;}
-    .block-container { padding-bottom: 5rem; }
+    .block-container { padding-bottom: 2rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -103,7 +102,6 @@ COUNTRY_CENTROIDS = {
 
 # --- FUNCTIONS ---
 def format_url_to_title(url):
-    """Generates a default title from URL slug."""
     if not isinstance(url, str): return "Unknown Event"
     try:
         parsed = urlparse(url)
@@ -116,38 +114,27 @@ def format_url_to_title(url):
     except: return "News Article"
 
 def verify_and_justify(url):
-    """
-    Analyzes content.
-    Returns: (is_relevant, summary_text)
-    Note: Always returns a summary text even if irrelevant, to update the UI.
-    """
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         response = requests.get(url, headers=headers, timeout=4)
-        if response.status_code != 200: 
-            return False, "⚠️ Analysis: Link inaccessible or broken."
+        if response.status_code != 200: return False, "⚠️ Analysis: Link inaccessible or broken."
         
         article = Article(url)
         article.set_html(response.content)
         article.parse()
         
-        # Check Keywords
         if not any(keyword in article.text.lower() for keyword in GEOPOLITICAL_KEYWORDS):
             return False, "⚠️ Analysis: No useful information (Irrelevant content)."
             
-        # Generate Summary
         try:
             article.nlp()
             summary = article.summary.replace('\n', ' ')
             if len(summary) > 400: summary = summary[:400] + "..."
             if not summary or len(summary) < 20: 
                 summary = "⚠️ Analysis: No useful information (Content too short)."
-        except: 
-            summary = "✅ Analysis: Relevant keywords found (Auto-summary failed)."
-            
+        except: summary = "✅ Analysis: Relevant keywords found (Auto-summary failed)."
         return True, summary
-    except Exception as e: 
-        return False, f"⚠️ Analysis Error: {str(e)}"
+    except Exception as e: return False, f"⚠️ Analysis Error: {str(e)}"
 
 def generate_gdelt_urls(hours_back):
     base_url = "http://data.gdeltproject.org/gdeltv2/"
@@ -194,6 +181,86 @@ def load_gdelt_data(hours):
     master_df['Score'] = (master_df['AvgTone'] * master_df['Goldstein'] * master_df['NumArticles'])
     return master_df
 
+def fetch_historical_trend(origin, custom_query):
+    """Fetches 12-month Volume * Tone data using specific GDELT params."""
+    
+    # 1. BUILD QUERY
+    # Logic: If Origin is "All", we search globally (keyword only).
+    # If Origin is selected, we filter by sourcecountry.
+    if origin != "All":
+        query_parts = [f"sourcecountry:{origin}"]
+        label = f"Media in {origin}"
+    else:
+        query_parts = []
+        label = "Global Media"
+
+    # Append keyword if provided
+    if custom_query.strip():
+        query_parts.append(custom_query)
+        label += f" reporting on '{custom_query}'"
+    else:
+        # Default fallback if no keyword provided
+        # CHANGED: Removed "tone:<-2" as it is not supported by the API in this context.
+        # Replaced with "conflict" keyword to maintain app theme.
+        query_parts.append("conflict") 
+        label += " (General Conflict)"
+    
+    final_query = " ".join(query_parts)
+
+    # 2. PARAMETERS (timelinesmooth=0, timezoom=yes, timespan=1Y)
+    api_base = "https://api.gdeltproject.org/api/v2/doc/doc"
+    
+    # We need TWO calls to calculate Vol * Tone (TimelineVolRaw * TimelineTone)
+    base_params = {
+        'query': final_query,
+        'format': 'json',
+        'timespan': '1Y',          # 1 Year
+        'timelinesmooth': 0,       # No smoothing
+        'timezoom': 'yes'          # Per user request
+    }
+    
+    debug_info = {}
+    
+    try:
+        # A. Fetch Volume (TimelineVolRaw)
+        vol_params = base_params.copy()
+        vol_params['mode'] = 'TimelineVolRaw'
+        debug_info['vol'] = requests.Request('GET', api_base, params=vol_params).prepare().url
+        r_vol = requests.get(api_base, params=vol_params, timeout=10)
+        
+        # B. Fetch Tone (TimelineTone)
+        tone_params = base_params.copy()
+        tone_params['mode'] = 'TimelineTone'
+        debug_info['tone'] = requests.Request('GET', api_base, params=tone_params).prepare().url
+        r_tone = requests.get(api_base, params=tone_params, timeout=10)
+        
+        if r_vol.status_code == 200 and r_tone.status_code == 200:
+            vol_json = r_vol.json()
+            tone_json = r_tone.json()
+            
+            # Extract Data
+            if 'timeline' not in vol_json or not vol_json['timeline']: return None, label, debug_info
+            vol_data = vol_json['timeline'][0]['data']
+            
+            if 'timeline' not in tone_json or not tone_json['timeline']: return None, label, debug_info
+            tone_data = tone_json['timeline'][0]['data']
+            
+            df_vol = pd.DataFrame(vol_data).rename(columns={'value': 'Volume'})
+            df_tone = pd.DataFrame(tone_data).rename(columns={'value': 'AvgTone'})
+            
+            # Merge & Process
+            df = pd.merge(df_vol, df_tone, on='date')
+            df['date'] = pd.to_datetime(df['date'])
+            
+            # Metric: Volume * Tone
+            df['Impact'] = df['Volume'] * df['AvgTone']
+            
+            return df, label, debug_info
+            
+    except Exception:
+        return None, label, debug_info
+    
+    return None, label, debug_info
 # ==============================================================================
 # MAIN APP LAYOUT
 # ==============================================================================
@@ -205,21 +272,17 @@ with st.status("📡 Updating Data Feed...", expanded=True) as status:
     status.update(label="Feed Active", state="complete", expanded=False)
 
 if not df.empty:
-    # --- PREPARE FILTERS ---
-    valid_countries = sorted([str(x) for x in df['Actor1GeoCountry'].unique() if len(str(x)) >= 2])
+    # --- UNIFIED COUNTRY LIST ---
+    all_actors = set(df['Actor1GeoCountry'].unique()) | set(df['Actor2GeoCountry'].unique())
+    valid_countries = sorted([str(x) for x in all_actors if len(str(x)) >= 2])
     valid_countries.insert(0, "All")
     
+    # --- FILTERS ---
     filtered_df = df.copy()
     if st.session_state.origin_country != "All":
         filtered_df = filtered_df[filtered_df['Actor1GeoCountry'] == st.session_state.origin_country]
-    
-    valid_a2 = sorted([str(x) for x in filtered_df['Actor2GeoCountry'].unique() if len(str(x)) >= 2])
-    valid_a2.insert(0, "All")
-    
-    if st.session_state.target_country != "All" and st.session_state.target_country in valid_a2:
+    if st.session_state.target_country != "All":
         filtered_df = filtered_df[filtered_df['Actor2GeoCountry'] == st.session_state.target_country]
-    elif st.session_state.target_country != "All":
-        st.session_state.target_country = "All"
 
     # --- PROCESS DATA ---
     filtered_df = filtered_df[(filtered_df['Goldstein'] < 0) & (filtered_df['AvgTone'] < 0)]
@@ -228,13 +291,9 @@ if not df.empty:
     filtered_df['AbsScore'] = filtered_df['Score'].abs()
     filtered_df = filtered_df.sort_values('AbsScore', ascending=False)
     
-    # 1. Generate Title (Always available)
     filtered_df['Title'] = filtered_df['SourceURL'].apply(format_url_to_title)
-    
-    # 2. Initialize Summary with Title (Before Scan)
     filtered_df['Summary'] = filtered_df['Title']
 
-    # 3. Merge Deep Scan Results (Overwrite Summary with Justification)
     if st.session_state.deep_scan_data is not None:
         ds_df = st.session_state.deep_scan_data
         filtered_df = filtered_df.set_index('SourceURL')
@@ -248,7 +307,6 @@ if not df.empty:
     filtered_df['MapLon'] = filtered_df['Actor2GeoCountry'].apply(get_lon)
     map_df = filtered_df.dropna(subset=['MapLat', 'MapLon'])
 
-    # Aggregate for Map (Get FIRST Title for the tooltip)
     country_df = map_df.groupby('Actor2GeoCountry').agg({
         'Score': 'sum', 'NumArticles': 'sum', 'MapLat': 'first', 'MapLon': 'first', 'Actor2Name': 'count', 'Title': 'first'
     }).rename(columns={'Actor2Name': 'EventCount', 'Title': 'TopTitle'}).reset_index()
@@ -279,8 +337,7 @@ if not df.empty:
 
     # --- RIGHT PANEL: MAP & CONTROLS ---
     with right_panel:
-        
-        # 1. TOP CONTROLS
+        # TOP CONTROLS
         tc1, tc2 = st.columns([1, 1], vertical_alignment="bottom")
         with tc1:
             new_origin = st.selectbox("Origin Country", valid_countries, index=valid_countries.index(st.session_state.origin_country) if st.session_state.origin_country in valid_countries else 0)
@@ -295,13 +352,8 @@ if not df.empty:
                     progress_bar = st.progress(0)
                     for i, (index, row) in enumerate(candidates.iterrows()):
                         progress_bar.progress((i + 1) / len(candidates))
-                        
-                        # VERIFY AND JUSTIFY
                         is_rel, just = verify_and_justify(row['SourceURL'])
-                        
-                        # STORE RESULT REGARDLESS OF RELEVANCE (To update table)
                         verified_rows.append({'SourceURL': row['SourceURL'], 'Summary': just})
-                        
                     progress_bar.empty()
                     
                     if verified_rows:
@@ -311,7 +363,7 @@ if not df.empty:
                     else:
                         status.update(label="Scan failed or no data", state="error")
 
-        # 2. MAP
+        # MAP
         if not country_df.empty:
             max_heat = country_df['HeatIntensity'].max()
             if max_heat == 0: max_heat = 1
@@ -343,57 +395,57 @@ if not df.empty:
                 ],
                 initial_view_state=pdk.ViewState(latitude=20, longitude=0, zoom=0.5),
                 map_style=pdk.map_styles.CARTO_DARK,
-                # Tooltip uses TopTitle (The persistent headline)
                 tooltip={"html": "<b>{Actor2GeoCountry}</b><br/>Heat: {Score}<br/>Events: {EventCount}<br/><i>Top Event: {TopTitle}</i>"}
             )
-            
             selection = st.pydeck_chart(deck, use_container_width=True, on_select="rerun", selection_mode="single-object")
-            
             if selection.selection and len(selection.selection['objects']) > 0:
                 for layer_idx, objects in selection.selection['objects'].items():
-                    if objects:
-                        st.session_state.selected_country = objects[0]['Actor2GeoCountry']
+                    if objects: st.session_state.selected_country = objects[0]['Actor2GeoCountry']
         else:
             st.warning("No data for map.")
 
-        # 3. SELECTED COUNTRY DETAIL (Below Map)
+        # SELECTED DETAIL
         if st.session_state.selected_country:
             st.info(f"📍 **Target Analysis: {st.session_state.selected_country}**")
-            
             details_df = filtered_df[filtered_df['Actor2GeoCountry'] == st.session_state.selected_country].head(10).copy()
-            
-            st.dataframe(
-                details_df[['Summary', 'Score', 'SourceURL']],
-                column_config={
-                    "SourceURL": st.column_config.LinkColumn("Link", width="small"),
-                    "Score": st.column_config.NumberColumn("Heat", format="%d"),
-                    "Summary": st.column_config.TextColumn("Summary / Title", width="large")
-                },
-                use_container_width=True,
-                hide_index=True
-            )
-            if st.button("Close Details"):
-                st.session_state.selected_country = None
-                st.rerun()
+            st.dataframe(details_df[['Summary', 'Score', 'SourceURL']], column_config={"SourceURL": st.column_config.LinkColumn("Link", width="small"), "Score": st.column_config.NumberColumn("Heat", format="%d"), "Summary": st.column_config.TextColumn("Summary", width="large")}, use_container_width=True, hide_index=True)
+            if st.button("Close Details"): st.session_state.selected_country = None; st.rerun()
 
-        # 4. BOTTOM CONTROLS
+        # BOTTOM CONTROLS
         st.markdown("---")
         bc1, bc2, bc3 = st.columns([1, 1, 1], vertical_alignment="bottom")
-        
         with bc1:
             new_time = st.slider("Time Window (Hours)", 1, 72, st.session_state.time_window)
-            if new_time != st.session_state.time_window:
-                st.session_state.time_window = new_time
-                st.rerun()
-        
+            if new_time != st.session_state.time_window: st.session_state.time_window = new_time; st.rerun()
         with bc2:
-            new_target = st.selectbox("Target Country", valid_a2, index=valid_a2.index(st.session_state.target_country) if st.session_state.target_country in valid_a2 else 0)
-            if new_target != st.session_state.target_country:
-                st.session_state.target_country = new_target
-                st.rerun()
-                
+            new_target = st.selectbox("Target Country", valid_countries, index=valid_countries.index(st.session_state.target_country) if st.session_state.target_country in valid_countries else 0)
+            if new_target != st.session_state.target_country: st.session_state.target_country = new_target; st.rerun()
         with bc3:
             st.download_button("📥 Download Raw Feed", filtered_df.to_csv(index=False), "gdelt_raw.csv", "text/csv", use_container_width=True)
+
+# ==============================================================================
+# HISTORICAL TREND GRAPH
+# ==============================================================================
+st.markdown("---")
+st.markdown("### 📈 Historical Evolution (Last 12 Months)")
+
+gc1, gc2 = st.columns([1, 2])
+with gc1: st.info(f"Source: **{st.session_state.origin_country}**")
+with gc2: timeline_query = st.text_input("Timeline Theme/Query", placeholder="e.g. 'Trade', 'Macron', 'China'", help="See how the Source Country reports on this topic.", label_visibility="collapsed")
+
+trend_df, label, debug_info = fetch_historical_trend(st.session_state.origin_country, timeline_query)
+
+with st.expander("🔌 API Query Debugger"):
+    if debug_info:
+        st.code(debug_info.get('vol', 'N/A'))
+        st.code(debug_info.get('tone', 'N/A'))
+    else: st.write("No query generated.")
+
+if trend_df is not None and not trend_df.empty:
+    st.line_chart(trend_df.set_index('date')['Impact'], color="#ff4b4b")
+    st.caption(f"Showing **Volume × Average Tone** for: {label}")
+else:
+    st.info("No sufficient historical data found. Try specifying a Query.")
 
 # ==============================================================================
 # KEYWORD SEARCH (Bottom)
@@ -403,7 +455,7 @@ st.header("📰 Keyword News Search")
 
 kc1, kc2 = st.columns([4, 1], vertical_alignment="bottom")
 with kc1: 
-    keyword = st.text_input("Search GDELT (Past 3 Months)", placeholder="e.g. 'Cyberattack', 'Border'", label_visibility="collapsed")
+    keyword = st.text_input("Search GDELT (Past 12 Months)", placeholder="e.g. 'Cyberattack', 'Border'", label_visibility="collapsed")
 with kc2: 
     search_btn = st.button("🔍 Search Keyword", use_container_width=True)
 
@@ -411,7 +463,7 @@ if search_btn and keyword: st.session_state['last_kw'] = keyword
 
 if 'last_kw' in st.session_state:
     kw = st.session_state['last_kw']
-    api_url = f"https://api.gdeltproject.org/api/v2/doc/doc?query={kw}&mode=artlist&maxrecords=50&timespan=3months&format=json"
+    api_url = f"https://api.gdeltproject.org/api/v2/doc/doc?query={kw}&mode=artlist&maxrecords=50&timespan=12months&format=json"
     
     with st.spinner("Searching..."):
         try:
@@ -421,24 +473,17 @@ if 'last_kw' in st.session_state:
                 if "articles" in data:
                     news_df = pd.DataFrame(data["articles"])
                     st.success(f"Found {len(news_df)} articles.")
-                    
                     if st.button("🚀 Deep Scan Results"):
                         progress = st.progress(0)
                         verified = []
                         for i, row in news_df.iterrows():
                             progress.progress((i+1)/len(news_df))
                             rel, just = verify_and_justify(row['url'])
-                            # Update with justification regardless of relevance for user feedback
                             row['Justification'] = just
                             verified.append(row)
                         progress.empty()
-                        
                         v_df = pd.DataFrame(verified)
-                        st.dataframe(v_df[['title', 'Justification', 'url']], 
-                                     column_config={"url": st.column_config.LinkColumn("Link")},
-                                     use_container_width=True)
+                        st.dataframe(v_df[['title', 'Justification', 'url']], column_config={"url": st.column_config.LinkColumn("Link")}, use_container_width=True)
                     else:
-                        st.dataframe(news_df[['title', 'seendate', 'url']], 
-                                     column_config={"url": st.column_config.LinkColumn("Link")},
-                                     use_container_width=True)
+                        st.dataframe(news_df[['title', 'seendate', 'url']], column_config={"url": st.column_config.LinkColumn("Link")}, use_container_width=True)
         except Exception as e: st.error(str(e))
