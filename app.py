@@ -4,6 +4,7 @@ import requests
 import zipfile
 import io
 import pydeck as pdk
+import altair as alt  # Added Altair import
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from newspaper import Article, Config 
@@ -185,8 +186,6 @@ def fetch_historical_trend(origin, custom_query):
     """Fetches 12-month Volume * Tone data using specific GDELT params."""
     
     # 1. BUILD QUERY
-    # Logic: If Origin is "All", we search globally (keyword only).
-    # If Origin is selected, we filter by sourcecountry.
     if origin != "All":
         query_parts = [f"sourcecountry:{origin}"]
         label = f"Media in {origin}"
@@ -199,9 +198,7 @@ def fetch_historical_trend(origin, custom_query):
         query_parts.append(custom_query)
         label += f" reporting on '{custom_query}'"
     else:
-        # Default fallback if no keyword provided
-        # CHANGED: Removed "tone:<-2" as it is not supported by the API in this context.
-        # Replaced with "conflict" keyword to maintain app theme.
+        # Fallback to general 'conflict' keyword instead of tone param
         query_parts.append("conflict") 
         label += " (General Conflict)"
     
@@ -210,7 +207,6 @@ def fetch_historical_trend(origin, custom_query):
     # 2. PARAMETERS (timelinesmooth=0, timezoom=yes, timespan=1Y)
     api_base = "https://api.gdeltproject.org/api/v2/doc/doc"
     
-    # We need TWO calls to calculate Vol * Tone (TimelineVolRaw * TimelineTone)
     base_params = {
         'query': final_query,
         'format': 'json',
@@ -252,7 +248,7 @@ def fetch_historical_trend(origin, custom_query):
             df = pd.merge(df_vol, df_tone, on='date')
             df['date'] = pd.to_datetime(df['date'])
             
-            # Metric: Volume * Tone
+            # Metric: Volume * Tone (Kept for reference, but plotted separately now)
             df['Impact'] = df['Volume'] * df['AvgTone']
             
             return df, label, debug_info
@@ -261,6 +257,7 @@ def fetch_historical_trend(origin, custom_query):
         return None, label, debug_info
     
     return None, label, debug_info
+
 # ==============================================================================
 # MAIN APP LAYOUT
 # ==============================================================================
@@ -424,7 +421,7 @@ if not df.empty:
             st.download_button("📥 Download Raw Feed", filtered_df.to_csv(index=False), "gdelt_raw.csv", "text/csv", use_container_width=True)
 
 # ==============================================================================
-# HISTORICAL TREND GRAPH
+# HISTORICAL TREND GRAPH (DUAL-AXIS UPDATE)
 # ==============================================================================
 st.markdown("---")
 st.markdown("### 📈 Historical Evolution (Last 12 Months)")
@@ -442,8 +439,32 @@ with st.expander("🔌 API Query Debugger"):
     else: st.write("No query generated.")
 
 if trend_df is not None and not trend_df.empty:
-    st.line_chart(trend_df.set_index('date')['Impact'], color="#ff4b4b")
-    st.caption(f"Showing **Volume × Average Tone** for: {label}")
+    # --- DUAL-AXIS CHART (Volume vs Tone) ---
+    base = alt.Chart(trend_df).encode(
+        x=alt.X('date:T', axis=alt.Axis(title='Date', format='%Y-%m-%d'))
+    )
+
+    # 1. Volume Line (Left Axis - Blue)
+    line_vol = base.mark_line(color='#3498db', strokeWidth=2).encode(
+        y=alt.Y('Volume:Q', axis=alt.Axis(title='Volume (Count)', titleColor='#3498db')),
+        tooltip=[alt.Tooltip('date', title='Date', format='%Y-%m-%d'), 'Volume', 'AvgTone']
+    )
+
+    # 2. Tone Line (Right Axis - Red/Orange)
+    line_tone = base.mark_line(color='#e74c3c', strokeWidth=2).encode(
+        y=alt.Y('AvgTone:Q', axis=alt.Axis(title='Average Tone', titleColor='#e74c3c'))
+    )
+
+    # Combine Layers and Resolve Independent Y-Axes
+    chart = alt.layer(line_vol, line_tone).resolve_scale(
+        y='independent'
+    ).properties(
+        height=350
+    )
+
+    st.altair_chart(chart, use_container_width=True)
+    st.caption(f"Comparing **Volume** (Blue, Left) vs **Tone** (Red, Right) for: {label}")
+
 else:
     st.info("No sufficient historical data found. Try specifying a Query.")
 
