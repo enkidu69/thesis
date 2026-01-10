@@ -4,7 +4,7 @@ import requests
 import zipfile
 import io
 import pydeck as pdk
-import altair as alt  # Added Altair import
+import altair as alt
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from newspaper import Article, Config 
@@ -63,14 +63,16 @@ if 'selected_country' not in st.session_state: st.session_state.selected_country
 if 'deep_scan_data' not in st.session_state: st.session_state.deep_scan_data = None
 
 # --- CONSTANTS ---
+# Expanded list to ensure robust "Geopolitical Relevance" checking
 GEOPOLITICAL_KEYWORDS = [
-    "military", "army", "navy", "air force", "troops", "soldiers",
+    "military", "army", "navy", "air force", "troops", "soldiers", "defense",
     "government", "parliament", "senate", "congress", "ministry", "minister", "president", "premier",
-    "diplomat", "ambassador", "treaty", "agreement", "sanction", "embargo",
-    "war", "conflict", "attack", "bomb", "missile", "strike", "terror", "crisis",
-    "border", "territory", "sovereignty", "election", "vote", "party",
-    "un", "united nations", "nato", "eu", "european union", "asean", "imf",
-    "protest", "riot", "coup", "rebellion", "insurgent", "police", "security"
+    "diplomat", "ambassador", "treaty", "agreement", "sanction", "embargo", "trade war",
+    "war", "conflict", "attack", "bomb", "missile", "strike", "terror", "crisis", "hostage",
+    "border", "territory", "sovereignty", "election", "vote", "party", "regime",
+    "un", "united nations", "nato", "eu", "european union", "asean", "imf", "wto",
+    "protest", "riot", "coup", "rebellion", "insurgent", "police", "security", "intelligence",
+    "cyber", "espionage", "nuclear", "weapon", "arms", "peacekeeping", "human rights"
 ]
 
 COUNTRY_CENTROIDS = {
@@ -115,6 +117,10 @@ def format_url_to_title(url):
     except: return "News Article"
 
 def verify_and_justify(url):
+    """
+    Scrapes the URL and performs a Geopolitical Relevance Check.
+    Returns: (bool is_relevant, str justification_or_summary)
+    """
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         response = requests.get(url, headers=headers, timeout=4)
@@ -124,16 +130,26 @@ def verify_and_justify(url):
         article.set_html(response.content)
         article.parse()
         
-        if not any(keyword in article.text.lower() for keyword in GEOPOLITICAL_KEYWORDS):
-            return False, "⚠️ Analysis: No useful information (Irrelevant content)."
+        # --- PERTINENCE CHECK ---
+        # Checks if article text contains specific geopolitical keywords
+        text_lower = article.text.lower()
+        found_keywords = [k for k in GEOPOLITICAL_KEYWORDS if k in text_lower]
+        
+        if not found_keywords:
+            return False, "⚠️ Irrelevant / Non-Geopolitical: No relevant context found in text."
             
         try:
             article.nlp()
             summary = article.summary.replace('\n', ' ')
             if len(summary) > 400: summary = summary[:400] + "..."
             if not summary or len(summary) < 20: 
-                summary = "⚠️ Analysis: No useful information (Content too short)."
-        except: summary = "✅ Analysis: Relevant keywords found (Auto-summary failed)."
+                summary = "⚠️ Content too short for full analysis."
+            else:
+                # Prefix with relevance confirmation
+                summary = f"✅ Relevant ({', '.join(found_keywords[:3])}...): " + summary
+        except: 
+            summary = f"✅ Relevant ({', '.join(found_keywords[:3])}...): Auto-summary failed."
+            
         return True, summary
     except Exception as e: return False, f"⚠️ Analysis Error: {str(e)}"
 
@@ -185,7 +201,6 @@ def load_gdelt_data(hours):
 def fetch_historical_trend(origin, custom_query):
     """Fetches 12-month Volume * Tone data using specific GDELT params."""
     
-    # 1. BUILD QUERY
     if origin != "All":
         query_parts = [f"sourcecountry:{origin}"]
         label = f"Media in {origin}"
@@ -193,38 +208,31 @@ def fetch_historical_trend(origin, custom_query):
         query_parts = []
         label = "Global Media"
 
-    # Append keyword if provided
     if custom_query.strip():
         query_parts.append(custom_query)
         label += f" reporting on '{custom_query}'"
     else:
-        # Fallback to general 'conflict' keyword instead of tone param
         query_parts.append("conflict") 
         label += " (General Conflict)"
     
     final_query = " ".join(query_parts)
 
-    # 2. PARAMETERS (timelinesmooth=0, timezoom=yes, timespan=1Y)
     api_base = "https://api.gdeltproject.org/api/v2/doc/doc"
-    
     base_params = {
         'query': final_query,
         'format': 'json',
-        'timespan': '1Y',          # 1 Year
-        'timelinesmooth': 0,       # No smoothing
-        'timezoom': 'yes'          # Per user request
+        'timespan': '1Y',          
+        'timelinesmooth': 0,       
+        'timezoom': 'yes'          
     }
-    
     debug_info = {}
     
     try:
-        # A. Fetch Volume (TimelineVolRaw)
         vol_params = base_params.copy()
         vol_params['mode'] = 'TimelineVolRaw'
         debug_info['vol'] = requests.Request('GET', api_base, params=vol_params).prepare().url
         r_vol = requests.get(api_base, params=vol_params, timeout=10)
         
-        # B. Fetch Tone (TimelineTone)
         tone_params = base_params.copy()
         tone_params['mode'] = 'TimelineTone'
         debug_info['tone'] = requests.Request('GET', api_base, params=tone_params).prepare().url
@@ -234,7 +242,6 @@ def fetch_historical_trend(origin, custom_query):
             vol_json = r_vol.json()
             tone_json = r_tone.json()
             
-            # Extract Data
             if 'timeline' not in vol_json or not vol_json['timeline']: return None, label, debug_info
             vol_data = vol_json['timeline'][0]['data']
             
@@ -244,11 +251,8 @@ def fetch_historical_trend(origin, custom_query):
             df_vol = pd.DataFrame(vol_data).rename(columns={'value': 'Volume'})
             df_tone = pd.DataFrame(tone_data).rename(columns={'value': 'AvgTone'})
             
-            # Merge & Process
             df = pd.merge(df_vol, df_tone, on='date')
             df['date'] = pd.to_datetime(df['date'])
-            
-            # Metric: Volume * Tone (Kept for reference, but plotted separately now)
             df['Impact'] = df['Volume'] * df['AvgTone']
             
             return df, label, debug_info
@@ -319,10 +323,12 @@ if not df.empty:
     # --- LEFT PANEL: EVENT FEED ---
     with left_panel:
         st.subheader("📋 Event Feed")
+        # UPDATED: Added 'EventCode' to display
         st.dataframe(
-            filtered_df[['EventDate', 'Summary', 'SourceURL', 'Score']],
+            filtered_df[['EventDate', 'EventCode', 'Summary', 'SourceURL', 'Score']],
             column_config={
                 "EventDate": st.column_config.DateColumn("Date", format="YYYY-MM-DD", width="small"),
+                "EventCode": st.column_config.TextColumn("CAMEO", width="small", help="CAMEO Action Code"),
                 "Summary": st.column_config.TextColumn("Summary / Title", width="large"),
                 "SourceURL": st.column_config.LinkColumn("Link", width="small"),
                 "Score": st.column_config.NumberColumn("Heat", format="%d", width="small")
@@ -342,13 +348,14 @@ if not df.empty:
                 st.session_state.origin_country = new_origin
                 st.rerun()
         with tc2:
-            if st.button("🚀 Run Deep Scan", use_container_width=True, help="Analyze top 20 events"):
+            if st.button("🚀 Run Deep Scan", use_container_width=True, help="Analyze top 20 events for geopolitical relevance"):
                 with st.status("🕵️ AI Analyst Working...", expanded=True) as status:
                     verified_rows = []
                     candidates = filtered_df.head(20)
                     progress_bar = st.progress(0)
                     for i, (index, row) in enumerate(candidates.iterrows()):
                         progress_bar.progress((i + 1) / len(candidates))
+                        # Perform Relevance Check
                         is_rel, just = verify_and_justify(row['SourceURL'])
                         verified_rows.append({'SourceURL': row['SourceURL'], 'Summary': just})
                     progress_bar.empty()
@@ -421,7 +428,7 @@ if not df.empty:
             st.download_button("📥 Download Raw Feed", filtered_df.to_csv(index=False), "gdelt_raw.csv", "text/csv", use_container_width=True)
 
 # ==============================================================================
-# HISTORICAL TREND GRAPH (DUAL-AXIS UPDATE)
+# HISTORICAL TREND GRAPH
 # ==============================================================================
 st.markdown("---")
 st.markdown("### 📈 Historical Evolution (Last 12 Months)")
@@ -439,32 +446,19 @@ with st.expander("🔌 API Query Debugger"):
     else: st.write("No query generated.")
 
 if trend_df is not None and not trend_df.empty:
-    # --- DUAL-AXIS CHART (Volume vs Tone) ---
     base = alt.Chart(trend_df).encode(
         x=alt.X('date:T', axis=alt.Axis(title='Date', format='%Y-%m-%d'))
     )
-
-    # 1. Volume Line (Left Axis - Blue)
     line_vol = base.mark_line(color='#3498db', strokeWidth=2).encode(
         y=alt.Y('Volume:Q', axis=alt.Axis(title='Volume (Count)', titleColor='#3498db')),
         tooltip=[alt.Tooltip('date', title='Date', format='%Y-%m-%d'), 'Volume', 'AvgTone']
     )
-
-    # 2. Tone Line (Right Axis - Red/Orange)
     line_tone = base.mark_line(color='#e74c3c', strokeWidth=2).encode(
         y=alt.Y('AvgTone:Q', axis=alt.Axis(title='Average Tone', titleColor='#e74c3c'))
     )
-
-    # Combine Layers and Resolve Independent Y-Axes
-    chart = alt.layer(line_vol, line_tone).resolve_scale(
-        y='independent'
-    ).properties(
-        height=350
-    )
-
+    chart = alt.layer(line_vol, line_tone).resolve_scale(y='independent').properties(height=350)
     st.altair_chart(chart, use_container_width=True)
     st.caption(f"Comparing **Volume** (Blue, Left) vs **Tone** (Red, Right) for: {label}")
-
 else:
     st.info("No sufficient historical data found. Try specifying a Query.")
 
@@ -494,11 +488,13 @@ if 'last_kw' in st.session_state:
                 if "articles" in data:
                     news_df = pd.DataFrame(data["articles"])
                     st.success(f"Found {len(news_df)} articles.")
-                    if st.button("🚀 Deep Scan Results"):
+                    
+                    if st.button("🚀 Deep Scan Results (Check Relevance)"):
                         progress = st.progress(0)
                         verified = []
                         for i, row in news_df.iterrows():
                             progress.progress((i+1)/len(news_df))
+                            # Perform Relevance Check here as well
                             rel, just = verify_and_justify(row['url'])
                             row['Justification'] = just
                             verified.append(row)
