@@ -9,6 +9,9 @@ from datetime import datetime, timedelta
 from urllib.parse import urlparse
 from newspaper import Article, Config 
 import nltk
+import math
+import re
+from collections import Counter
 
 # --- NLTK SETUP ---
 try:
@@ -30,7 +33,6 @@ st.markdown("""
     .main { padding-top: 1rem; }
     h1 { color: #2c3e50; font-family: 'Helvetica Neue', sans-serif; font-size: 2.2rem; }
     
-    /* DATAFRAME TEXT WRAPPING FIX */
     div[data-testid="stDataFrame"] div[role="grid"] div[role="row"] div[role="gridcell"] {
         white-space: normal !important;
         line-height: 1.5 !important;
@@ -41,14 +43,12 @@ st.markdown("""
         padding-bottom: 10px !important;
     }
     
-    /* Button Alignment */
     div.stButton > button {
         height: 2.6rem; 
         width: 100%;
         border-radius: 6px;
     }
     
-    /* REMOVE FOOTER & WHITESPACE */
     footer {display: none !important;}
     header {visibility: hidden;}
     .block-container { padding-bottom: 2rem; }
@@ -63,18 +63,6 @@ if 'selected_country' not in st.session_state: st.session_state.selected_country
 if 'deep_scan_data' not in st.session_state: st.session_state.deep_scan_data = None
 
 # --- CONSTANTS ---
-# Expanded list to ensure robust "Geopolitical Relevance" checking
-GEOPOLITICAL_KEYWORDS = [
-    "military", "army", "navy", "air force", "troops", "soldiers", "defense",
-    "government", "parliament", "senate", "congress", "ministry", "minister", "president", "premier",
-    "diplomat", "ambassador", "treaty", "agreement", "sanction", "embargo", "trade war",
-    "war", "conflict", "attack", "bomb", "missile", "strike", "terror", "crisis", "hostage",
-    "border", "territory", "sovereignty", "election", "vote", "party", "regime",
-    "un", "united nations", "nato", "eu", "european union", "asean", "imf", "wto",
-    "protest", "riot", "coup", "rebellion", "insurgent", "police", "security", "intelligence",
-    "cyber", "espionage", "nuclear", "weapon", "arms", "peacekeeping", "human rights"
-]
-
 COUNTRY_CENTROIDS = {
     'AF': [33.0, 65.0], 'AL': [41.0, 20.0], 'AG': [28.0, 3.0], 'AR': [-34.0, -64.0],
     'AS': [-25.0, 134.0], 'AU': [47.3, 13.3], 'AJ': [40.5, 47.5], 'BA': [26.0, 50.5],
@@ -116,41 +104,78 @@ def format_url_to_title(url):
         return title[:100]
     except: return "News Article"
 
+# --- ZERO-DEPENDENCY AI ANALYZER ---
+def text_to_vector(text):
+    """Converts text to a word frequency vector (Counter)"""
+    words = re.compile(r'\w+').findall(text.lower())
+    return Counter(words)
+
+def get_cosine(vec1, vec2):
+    """Calculates Cosine Similarity between two vectors manually."""
+    intersection = set(vec1.keys()) & set(vec2.keys())
+    numerator = sum([vec1[x] * vec2[x] for x in intersection])
+
+    sum1 = sum([vec1[x]**2 for x in vec1.keys()])
+    sum2 = sum([vec2[x]**2 for x in vec2.keys()])
+    denominator = math.sqrt(sum1) * math.sqrt(sum2)
+
+    if not denominator:
+        return 0.0
+    return numerator / denominator
+
 def verify_and_justify(url):
     """
-    Scrapes the URL and performs a Geopolitical Relevance Check.
-    Returns: (bool is_relevant, str justification_or_summary)
+    Performs 'Geopolitical Relevance' check using Pure Python Vector Space Model.
+    No scikit-learn/numpy required.
     """
     try:
+        # 1. FETCH CONTENT
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         response = requests.get(url, headers=headers, timeout=4)
-        if response.status_code != 200: return False, "⚠️ Analysis: Link inaccessible or broken."
+        if response.status_code != 200: return False, "⚠️ Link inaccessible or broken."
         
+        # 2. PARSE CONTENT
         article = Article(url)
         article.set_html(response.content)
         article.parse()
         
-        # --- PERTINENCE CHECK ---
-        # Checks if article text contains specific geopolitical keywords
-        text_lower = article.text.lower()
-        found_keywords = [k for k in GEOPOLITICAL_KEYWORDS if k in text_lower]
+        # 3. PREPARE TEXT
+        text_content = f"{article.title} {article.text[:1500]}"
+        if len(text_content) < 50:
+            return False, "⚠️ Content too short for analysis."
+
+        # 4. GOLD STANDARD CONTEXT (The 'Definition' of relevance)
+        geopolitical_context = """
+        International relations military conflict war army navy air force troops defense 
+        sovereignty border dispute territorial integrity diplomacy foreign policy 
+        united nations nato european union sanctions trade war espionage cyber warfare 
+        nuclear weapons arms control peacekeeping insurgency coup d'etat rebellion 
+        civil unrest government regime parliament ministry of foreign affairs ambassador 
+        treaty bilateral agreement geopolitical strategy statecraft security services 
+        intelligence agency military alliance strategic interests
+        """
         
-        if not found_keywords:
-            return False, "⚠️ Irrelevant / Non-Geopolitical: No relevant context found in text."
-            
+        # 5. COMPUTE SIMILARITY (Pure Python)
+        vector_article = text_to_vector(text_content)
+        vector_context = text_to_vector(geopolitical_context)
+        
+        score = get_cosine(vector_article, vector_context)
+        
+        # 6. GENERATE SUMMARY
         try:
             article.nlp()
-            summary = article.summary.replace('\n', ' ')
-            if len(summary) > 400: summary = summary[:400] + "..."
-            if not summary or len(summary) < 20: 
-                summary = "⚠️ Content too short for full analysis."
-            else:
-                # Prefix with relevance confirmation
-                summary = f"✅ Relevant ({', '.join(found_keywords[:3])}...): " + summary
-        except: 
-            summary = f"✅ Relevant ({', '.join(found_keywords[:3])}...): Auto-summary failed."
-            
-        return True, summary
+            summary_text = article.summary.replace('\n', ' ')[:300] + "..."
+        except:
+            summary_text = text_content[:300] + "..."
+
+        # 7. DECISION
+        # Pure Cosine similarity is usually lower than TF-IDF, so we adjust threshold.
+        # > 0.15 indicates significant vocabulary overlap.
+        if score > 0.15:
+            return True, f"✅ Verified (Relevance: {int(score*100)}%): {summary_text}"
+        else:
+            return False, f"⚠️ Low Relevance (Score: {int(score*100)}%): vocabulary does not match geopolitical themes."
+
     except Exception as e: return False, f"⚠️ Analysis Error: {str(e)}"
 
 def generate_gdelt_urls(hours_back):
@@ -253,7 +278,6 @@ def fetch_historical_trend(origin, custom_query):
             
             df = pd.merge(df_vol, df_tone, on='date')
             df['date'] = pd.to_datetime(df['date'])
-            df['Impact'] = df['Volume'] * df['AvgTone']
             
             return df, label, debug_info
             
@@ -323,7 +347,6 @@ if not df.empty:
     # --- LEFT PANEL: EVENT FEED ---
     with left_panel:
         st.subheader("📋 Event Feed")
-        # UPDATED: Added 'EventCode' to display
         st.dataframe(
             filtered_df[['EventDate', 'EventCode', 'Summary', 'SourceURL', 'Score']],
             column_config={
@@ -340,7 +363,6 @@ if not df.empty:
 
     # --- RIGHT PANEL: MAP & CONTROLS ---
     with right_panel:
-        # TOP CONTROLS
         tc1, tc2 = st.columns([1, 1], vertical_alignment="bottom")
         with tc1:
             new_origin = st.selectbox("Origin Country", valid_countries, index=valid_countries.index(st.session_state.origin_country) if st.session_state.origin_country in valid_countries else 0)
@@ -348,14 +370,13 @@ if not df.empty:
                 st.session_state.origin_country = new_origin
                 st.rerun()
         with tc2:
-            if st.button("🚀 Run Deep Scan", use_container_width=True, help="Analyze top 20 events for geopolitical relevance"):
-                with st.status("🕵️ AI Analyst Working...", expanded=True) as status:
+            if st.button("🚀 Run Deep Scan", use_container_width=True, help="Analyze top 20 events using AI"):
+                with st.status("🕵️ AI Analyst Working (Zero-Dependency)...", expanded=True) as status:
                     verified_rows = []
                     candidates = filtered_df.head(20)
                     progress_bar = st.progress(0)
                     for i, (index, row) in enumerate(candidates.iterrows()):
                         progress_bar.progress((i + 1) / len(candidates))
-                        # Perform Relevance Check
                         is_rel, just = verify_and_justify(row['SourceURL'])
                         verified_rows.append({'SourceURL': row['SourceURL'], 'Summary': just})
                     progress_bar.empty()
@@ -367,7 +388,6 @@ if not df.empty:
                     else:
                         status.update(label="Scan failed or no data", state="error")
 
-        # MAP
         if not country_df.empty:
             max_heat = country_df['HeatIntensity'].max()
             if max_heat == 0: max_heat = 1
@@ -408,14 +428,12 @@ if not df.empty:
         else:
             st.warning("No data for map.")
 
-        # SELECTED DETAIL
         if st.session_state.selected_country:
             st.info(f"📍 **Target Analysis: {st.session_state.selected_country}**")
             details_df = filtered_df[filtered_df['Actor2GeoCountry'] == st.session_state.selected_country].head(10).copy()
-            st.dataframe(details_df[['Summary', 'Score', 'SourceURL']], column_config={"SourceURL": st.column_config.LinkColumn("Link", width="small"), "Score": st.column_config.NumberColumn("Heat", format="%d"), "Summary": st.column_config.TextColumn("Summary", width="large")}, use_container_width=True, hide_index=True)
+            st.dataframe(details_df[['EventCode', 'Summary', 'Score', 'SourceURL']], column_config={"SourceURL": st.column_config.LinkColumn("Link", width="small"), "Score": st.column_config.NumberColumn("Heat", format="%d"), "Summary": st.column_config.TextColumn("Summary", width="large")}, use_container_width=True, hide_index=True)
             if st.button("Close Details"): st.session_state.selected_country = None; st.rerun()
 
-        # BOTTOM CONTROLS
         st.markdown("---")
         bc1, bc2, bc3 = st.columns([1, 1, 1], vertical_alignment="bottom")
         with bc1:
@@ -439,12 +457,6 @@ with gc2: timeline_query = st.text_input("Timeline Theme/Query", placeholder="e.
 
 trend_df, label, debug_info = fetch_historical_trend(st.session_state.origin_country, timeline_query)
 
-with st.expander("🔌 API Query Debugger"):
-    if debug_info:
-        st.code(debug_info.get('vol', 'N/A'))
-        st.code(debug_info.get('tone', 'N/A'))
-    else: st.write("No query generated.")
-
 if trend_df is not None and not trend_df.empty:
     base = alt.Chart(trend_df).encode(
         x=alt.X('date:T', axis=alt.Axis(title='Date', format='%Y-%m-%d'))
@@ -457,6 +469,7 @@ if trend_df is not None and not trend_df.empty:
         y=alt.Y('AvgTone:Q', axis=alt.Axis(title='Average Tone', titleColor='#e74c3c'))
     )
     chart = alt.layer(line_vol, line_tone).resolve_scale(y='independent').properties(height=350)
+
     st.altair_chart(chart, use_container_width=True)
     st.caption(f"Comparing **Volume** (Blue, Left) vs **Tone** (Red, Right) for: {label}")
 else:
@@ -488,13 +501,11 @@ if 'last_kw' in st.session_state:
                 if "articles" in data:
                     news_df = pd.DataFrame(data["articles"])
                     st.success(f"Found {len(news_df)} articles.")
-                    
-                    if st.button("🚀 Deep Scan Results (Check Relevance)"):
+                    if st.button("🚀 Deep Scan Results (Verify Relevance)"):
                         progress = st.progress(0)
                         verified = []
                         for i, row in news_df.iterrows():
                             progress.progress((i+1)/len(news_df))
-                            # Perform Relevance Check here as well
                             rel, just = verify_and_justify(row['url'])
                             row['Justification'] = just
                             verified.append(row)
