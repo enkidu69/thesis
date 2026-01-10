@@ -446,7 +446,7 @@ if not df.empty:
             st.download_button("📥 Download Raw Feed", filtered_df.to_csv(index=False), "gdelt_raw.csv", "text/csv", use_container_width=True)
 
 # ==============================================================================
-# HISTORICAL TREND GRAPH
+# HISTORICAL TREND GRAPH (INVERTED TONE AXIS)
 # ==============================================================================
 st.markdown("---")
 st.markdown("### 📈 Historical Evolution (Last 12 Months)")
@@ -461,13 +461,21 @@ if trend_df is not None and not trend_df.empty:
     base = alt.Chart(trend_df).encode(
         x=alt.X('date:T', axis=alt.Axis(title='Date', format='%Y-%m-%d'))
     )
+    
+    # 1. Volume Line (Left Axis - Blue)
     line_vol = base.mark_line(color='#3498db', strokeWidth=2).encode(
         y=alt.Y('Volume:Q', axis=alt.Axis(title='Volume (Count)', titleColor='#3498db')),
         tooltip=[alt.Tooltip('date', title='Date', format='%Y-%m-%d'), 'Volume', 'AvgTone']
     )
+    
+    # 2. Tone Line (Right Axis - Red/Orange)
+    # INVERTED: Negative values on top (so "high conflict" peaks upwards)
     line_tone = base.mark_line(color='#e74c3c', strokeWidth=2).encode(
-        y=alt.Y('AvgTone:Q', axis=alt.Axis(title='Average Tone', titleColor='#e74c3c'))
+        y=alt.Y('AvgTone:Q', 
+                scale=alt.Scale(reverse=True),
+                axis=alt.Axis(title='Average Tone (Inverted: Negative on Top)', titleColor='#e74c3c'))
     )
+    
     chart = alt.layer(line_vol, line_tone).resolve_scale(y='independent').properties(height=350)
 
     st.altair_chart(chart, use_container_width=True)
