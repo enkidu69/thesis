@@ -106,45 +106,31 @@ def format_url_to_title(url):
 
 # --- ZERO-DEPENDENCY AI ANALYZER ---
 def text_to_vector(text):
-    """Converts text to a word frequency vector (Counter)"""
     words = re.compile(r'\w+').findall(text.lower())
     return Counter(words)
 
 def get_cosine(vec1, vec2):
-    """Calculates Cosine Similarity between two vectors manually."""
     intersection = set(vec1.keys()) & set(vec2.keys())
     numerator = sum([vec1[x] * vec2[x] for x in intersection])
-
     sum1 = sum([vec1[x]**2 for x in vec1.keys()])
     sum2 = sum([vec2[x]**2 for x in vec2.keys()])
     denominator = math.sqrt(sum1) * math.sqrt(sum2)
-
-    if not denominator:
-        return 0.0
+    if not denominator: return 0.0
     return numerator / denominator
 
 def verify_and_justify(url):
-    """
-    Performs 'Geopolitical Relevance' check using Pure Python Vector Space Model.
-    No scikit-learn/numpy required.
-    """
     try:
-        # 1. FETCH CONTENT
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         response = requests.get(url, headers=headers, timeout=4)
         if response.status_code != 200: return False, "⚠️ Link inaccessible or broken."
         
-        # 2. PARSE CONTENT
         article = Article(url)
         article.set_html(response.content)
         article.parse()
         
-        # 3. PREPARE TEXT
         text_content = f"{article.title} {article.text[:1500]}"
-        if len(text_content) < 50:
-            return False, "⚠️ Content too short for analysis."
+        if len(text_content) < 50: return False, "⚠️ Content too short."
 
-        # 4. GOLD STANDARD CONTEXT (The 'Definition' of relevance)
         geopolitical_context = """
         International relations military conflict war army navy air force troops defense 
         sovereignty border dispute territorial integrity diplomacy foreign policy 
@@ -155,22 +141,16 @@ def verify_and_justify(url):
         intelligence agency military alliance strategic interests
         """
         
-        # 5. COMPUTE SIMILARITY (Pure Python)
         vector_article = text_to_vector(text_content)
         vector_context = text_to_vector(geopolitical_context)
-        
         score = get_cosine(vector_article, vector_context)
         
-        # 6. GENERATE SUMMARY
         try:
             article.nlp()
             summary_text = article.summary.replace('\n', ' ')[:300] + "..."
         except:
             summary_text = text_content[:300] + "..."
 
-        # 7. DECISION
-        # Pure Cosine similarity is usually lower than TF-IDF, so we adjust threshold.
-        # > 0.15 indicates significant vocabulary overlap.
         if score > 0.15:
             return True, f"✅ Verified (Relevance: {int(score*100)}%): {summary_text}"
         else:
@@ -214,18 +194,17 @@ def load_gdelt_data(hours):
         except Exception: continue
     if master_df.empty: return master_df
     
-    for col in ['Goldstein', 'NumArticles', 'AvgTone']:
+    for col in ['Goldstein', 'NumArticles', 'AvgTone','NumMentions']:
         master_df[col] = pd.to_numeric(master_df[col], errors='coerce').fillna(0)
     master_df['EventDate'] = pd.to_datetime(master_df['Day'], format='%Y%m%d', errors='coerce')
     
     target_codes = ['130','131','1311','1312','1313','132','1321','1322','1323','1324','133','134','135','136','137','138','1381','1382','1383','1384','1385','139','150','151','152','153','154','155','16','160','161','162','1621','1622','1623','163','164','165','166','1661','1662','1663','1712','1721','1722','1723','1724','174','175','180','181','182','1821','1822','1823','183','1831','1832','1833','1834','184','185','186','190','191','192','193','194','195','1951','1952','196','200','201','202','203','204','2041','2042']
     master_df = master_df[master_df['EventCode'].isin(target_codes)]
-    master_df['Score'] = (master_df['AvgTone'] * master_df['Goldstein'] * master_df['NumArticles'])
+    master_df['Score'] = (master_df['AvgTone'] * master_df['Goldstein'] * master_df['NumArticles']* master_df['NumMentions'])
     return master_df
 
 def fetch_historical_trend(origin, custom_query):
-    """Fetches 12-month Volume * Tone data using specific GDELT params."""
-    
+    """Fetches 3-Year Volume * Tone data."""
     if origin != "All":
         query_parts = [f"sourcecountry:{origin}"]
         label = f"Media in {origin}"
@@ -234,8 +213,10 @@ def fetch_historical_trend(origin, custom_query):
         label = "Global Media"
 
     if custom_query.strip():
-        query_parts.append(custom_query)
-        label += f" reporting on '{custom_query}'"
+        # Handle multiple keywords by replacing commas with OR
+        processed_query = custom_query.replace(",", " OR ")
+        query_parts.append(f"({processed_query})")
+        label += f" reporting on '{processed_query}'"
     else:
         query_parts.append("conflict") 
         label += " (General Conflict)"
@@ -246,31 +227,28 @@ def fetch_historical_trend(origin, custom_query):
     base_params = {
         'query': final_query,
         'format': 'json',
-        'timespan': '1Y',          
-        'timelinesmooth': 0,       
-        'timezoom': 'yes'          
+        'timespan': '3years',      # FIXED: Changed from '36months' to standard '3years'
+        'timelinesmooth': 5,
+        'timezoom': 'no'           # FIXED: Force full timeline, preventing auto-zoom to 1 week
     }
-    debug_info = {}
     
     try:
         vol_params = base_params.copy()
         vol_params['mode'] = 'TimelineVolRaw'
-        debug_info['vol'] = requests.Request('GET', api_base, params=vol_params).prepare().url
-        r_vol = requests.get(api_base, params=vol_params, timeout=10)
+        r_vol = requests.get(api_base, params=vol_params, timeout=15)
         
         tone_params = base_params.copy()
         tone_params['mode'] = 'TimelineTone'
-        debug_info['tone'] = requests.Request('GET', api_base, params=tone_params).prepare().url
-        r_tone = requests.get(api_base, params=tone_params, timeout=10)
+        r_tone = requests.get(api_base, params=tone_params, timeout=15)
         
         if r_vol.status_code == 200 and r_tone.status_code == 200:
             vol_json = r_vol.json()
             tone_json = r_tone.json()
             
-            if 'timeline' not in vol_json or not vol_json['timeline']: return None, label, debug_info
+            if 'timeline' not in vol_json or not vol_json['timeline']: return None, label
             vol_data = vol_json['timeline'][0]['data']
             
-            if 'timeline' not in tone_json or not tone_json['timeline']: return None, label, debug_info
+            if 'timeline' not in tone_json or not tone_json['timeline']: return None, label
             tone_data = tone_json['timeline'][0]['data']
             
             df_vol = pd.DataFrame(vol_data).rename(columns={'value': 'Volume'})
@@ -279,12 +257,12 @@ def fetch_historical_trend(origin, custom_query):
             df = pd.merge(df_vol, df_tone, on='date')
             df['date'] = pd.to_datetime(df['date'])
             
-            return df, label, debug_info
+            return df, label
             
     except Exception:
-        return None, label, debug_info
+        return None, label
     
-    return None, label, debug_info
+    return None, label
 
 # ==============================================================================
 # MAIN APP LAYOUT
@@ -297,19 +275,16 @@ with st.status("📡 Updating Data Feed...", expanded=True) as status:
     status.update(label="Feed Active", state="complete", expanded=False)
 
 if not df.empty:
-    # --- UNIFIED COUNTRY LIST ---
     all_actors = set(df['Actor1GeoCountry'].unique()) | set(df['Actor2GeoCountry'].unique())
     valid_countries = sorted([str(x) for x in all_actors if len(str(x)) >= 2])
     valid_countries.insert(0, "All")
     
-    # --- FILTERS ---
     filtered_df = df.copy()
     if st.session_state.origin_country != "All":
         filtered_df = filtered_df[filtered_df['Actor1GeoCountry'] == st.session_state.origin_country]
     if st.session_state.target_country != "All":
         filtered_df = filtered_df[filtered_df['Actor2GeoCountry'] == st.session_state.target_country]
 
-    # --- PROCESS DATA ---
     filtered_df = filtered_df[(filtered_df['Goldstein'] < 0) & (filtered_df['AvgTone'] < 0)]
     filtered_df = filtered_df.drop_duplicates(subset=['SourceURL'])
     filtered_df['Score'] = filtered_df['Score'].astype(int)
@@ -339,12 +314,8 @@ if not df.empty:
     country_df['HeatIntensity'] = country_df['Score'].abs()
     country_df = country_df.sort_values('HeatIntensity', ascending=False)
 
-    # ======================================================================
-    # SPLIT LAYOUT
-    # ======================================================================
     left_panel, right_panel = st.columns([1, 1.2], gap="medium")
 
-    # --- LEFT PANEL: EVENT FEED ---
     with left_panel:
         st.subheader("📋 Event Feed")
         st.dataframe(
@@ -361,7 +332,6 @@ if not df.empty:
             hide_index=True
         )
 
-    # --- RIGHT PANEL: MAP & CONTROLS ---
     with right_panel:
         tc1, tc2 = st.columns([1, 1], vertical_alignment="bottom")
         with tc1:
@@ -449,39 +419,38 @@ if not df.empty:
 # HISTORICAL TREND GRAPH (INVERTED TONE AXIS)
 # ==============================================================================
 st.markdown("---")
-st.markdown("### 📈 Historical Evolution (Last 12 Months)")
+st.markdown("### 📈 Historical Evolution (Last 3 Years)")
 
 gc1, gc2 = st.columns([1, 2])
 with gc1: st.info(f"Source: **{st.session_state.origin_country}**")
 with gc2: timeline_query = st.text_input("Timeline Theme/Query", placeholder="e.g. 'Trade', 'Macron', 'China'", help="See how the Source Country reports on this topic.", label_visibility="collapsed")
 
-trend_df, label, debug_info = fetch_historical_trend(st.session_state.origin_country, timeline_query)
+trend_df, label = fetch_historical_trend(st.session_state.origin_country, timeline_query)
 
 if trend_df is not None and not trend_df.empty:
     base = alt.Chart(trend_df).encode(
         x=alt.X('date:T', axis=alt.Axis(title='Date', format='%Y-%m-%d'))
     )
     
-    # 1. Volume Line (Left Axis - Blue)
-    line_vol = base.mark_line(color='#3498db', strokeWidth=2).encode(
+    # 1. Volume Area (Left Axis - Blue)
+    line_vol = base.mark_area(opacity=0.4, line=True, color='#3498db').encode(
         y=alt.Y('Volume:Q', axis=alt.Axis(title='Volume (Count)', titleColor='#3498db')),
         tooltip=[alt.Tooltip('date', title='Date', format='%Y-%m-%d'), 'Volume', 'AvgTone']
     )
     
     # 2. Tone Line (Right Axis - Red/Orange)
-    # INVERTED: Negative values on top (so "high conflict" peaks upwards)
     line_tone = base.mark_line(color='#e74c3c', strokeWidth=2).encode(
         y=alt.Y('AvgTone:Q', 
                 scale=alt.Scale(reverse=True),
-                axis=alt.Axis(title='Average Tone (Inverted: Negative on Top)', titleColor='#e74c3c'))
+                axis=alt.Axis(title='Average Tone (Inverted)', titleColor='#e74c3c'))
     )
     
     chart = alt.layer(line_vol, line_tone).resolve_scale(y='independent').properties(height=350)
 
     st.altair_chart(chart, use_container_width=True)
-    st.caption(f"Comparing **Volume** (Blue, Left) vs **Tone** (Red, Right) for: {label}")
+    st.caption(f"Comparing **Volume** (Blue Area, Left) vs **Tone** (Red Line, Right) for: {label} (3 Years)")
 else:
-    st.info("No sufficient historical data found. Try specifying a Query.")
+    st.info("No historical data found. Try specifying a Query.")
 
 # ==============================================================================
 # KEYWORD SEARCH (Bottom)
@@ -491,7 +460,7 @@ st.header("📰 Keyword News Search")
 
 kc1, kc2 = st.columns([4, 1], vertical_alignment="bottom")
 with kc1: 
-    keyword = st.text_input("Search GDELT (Past 12 Months)", placeholder="e.g. 'Cyberattack', 'Border'", label_visibility="collapsed")
+    keyword = st.text_input("Search GDELT (Past 12 Months)", placeholder="e.g. 'Cyberattack', 'Border' (comma-separated for OR)", label_visibility="collapsed")
 with kc2: 
     search_btn = st.button("🔍 Search Keyword", use_container_width=True)
 
@@ -499,16 +468,26 @@ if search_btn and keyword: st.session_state['last_kw'] = keyword
 
 if 'last_kw' in st.session_state:
     kw = st.session_state['last_kw']
-    api_url = f"https://api.gdeltproject.org/api/v2/doc/doc?query={kw}&mode=artlist&maxrecords=50&timespan=12months&format=json"
+    
+    final_kw = kw.replace(",", " OR ")
+    
+    api_url = "https://api.gdeltproject.org/api/v2/doc/doc"
+    params = {
+        'query': final_kw,
+        'mode': 'artlist',
+        'maxrecords': 500,
+        'timespan': '12months',
+        'format': 'json'
+    }
     
     with st.spinner("Searching..."):
         try:
-            r = requests.get(api_url)
+            r = requests.get(api_url, params=params)
             if r.status_code == 200:
                 data = r.json()
                 if "articles" in data:
                     news_df = pd.DataFrame(data["articles"])
-                    st.success(f"Found {len(news_df)} articles.")
+                    st.success(f"Found {len(news_df)} articles for '{final_kw}'.")
                     if st.button("🚀 Deep Scan Results (Verify Relevance)"):
                         progress = st.progress(0)
                         verified = []
@@ -522,4 +501,9 @@ if 'last_kw' in st.session_state:
                         st.dataframe(v_df[['title', 'Justification', 'url']], column_config={"url": st.column_config.LinkColumn("Link")}, use_container_width=True)
                     else:
                         st.dataframe(news_df[['title', 'seendate', 'url']], column_config={"url": st.column_config.LinkColumn("Link")}, use_container_width=True)
-        except Exception as e: st.error(str(e))
+                else:
+                    st.warning("No articles found.")
+            else:
+                st.error(f"GDELT API Error: {r.status_code}")
+        except Exception as e:
+            st.error(f"Connection Error: {e}")
