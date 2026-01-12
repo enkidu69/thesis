@@ -467,7 +467,7 @@ CUSTOM_SCENARIO = "NumSourcesXNumMentionsXNumArticles_Zscore"
 CUSTOM_AGG      = "sum"                  
 CUSTOM_HORIZON  = "3-day"                
 CUSTOM_MODEL    = "Random Forest"              
-CUSTOM_THRESH   = 0.55                   
+CUSTOM_THRESH   = 0.49                   
 
 generate_alert_table_full(
     run_data_cache, 
