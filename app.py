@@ -197,7 +197,8 @@ def generate_gdelt_urls(hours_back):
 @st.cache_data(ttl=900, show_spinner=False) 
 def load_gdelt_data(hours):
     urls = generate_gdelt_urls(hours)
-    raw_mapping = {0:'GlobalEventID', 1:'Day', 6:'Actor1Name', 37:'Actor1GeoCountry', 16:'Actor2Name', 45:'Actor2GeoCountry', 26:'EventCode', 30:'Goldstein', 31:'NumMentions', 33:'NumArticles', 34:'AvgTone', 60:'SourceURL'}
+    #modified to root code from 26 to 28
+    raw_mapping = {0:'GlobalEventID', 1:'Day', 6:'Actor1Name', 37:'Actor1GeoCountry', 16:'Actor2Name', 45:'Actor2GeoCountry', 28:'EventCode', 30:'Goldstein', 31:'NumMentions', 33:'NumArticles', 34:'AvgTone', 60:'SourceURL'}
     sorted_mapping = dict(sorted(raw_mapping.items()))
     use_cols = list(sorted_mapping.keys())
     col_names_ordered = list(sorted_mapping.values())
@@ -218,8 +219,11 @@ def load_gdelt_data(hours):
         master_df[col] = pd.to_numeric(master_df[col], errors='coerce').fillna(0)
     master_df['EventDate'] = pd.to_datetime(master_df['Day'], format='%Y%m%d', errors='coerce')
     
-    target_codes = ['130','131','1311','1312','1313','132','1321','1322','1323','1324','133','134','135','136','137','138','1381','1382','1383','1384','1385','139','150','151','152','153','154','155','16','160','161','162','1621','1622','1623','163','164','165','166','1661','1662','1663','1712','1721','1722','1723','1724','174','175','180','181','182','1821','1822','1823','183','1831','1832','1833','1834','184','185','186','190','191','192','193','194','195','1951','1952','196','200','201','202','203','204','2041','2042']
+    #target_codes = ['1012','1014','102','1032','1033','1034','1041','1042','1043','1044','1052','1054','1055','1056','106','107','108','111','1121','1122','1123','1124','1125','113','114','115','116','121','1211','1212','122','1221','1222','1223','1224','123','1231','1232','1233','1234','124','1241','1242','1243','1244','1245','1246','125','126','127','128','129','130','131','1311','1312','1313','132','1321','1322','1323','1324','133','134','135','136','137','138','1381','1382','1383','1384','1385','139','140','141','1411','1412','1413','1414','142','1421','1422','1423','1424','143','1431','1432','1433','1434','144','1441','1442','1443','1444','145','1451','1452','1453','1454','150','151','152','153','154','155','160','161','162','1621','1622','1623','163','164','165','166','1661','1662','1663','1712','1721','1722','1723','1724','174','175','180','181','182','1821','1822','1823','183','1831','1832','1833','1834','184','185','186','190','191','192','193','194','195','1951','1952','196','200','201','202','203','204','2041','2042']
+    target_codes = ['13','15','16','17','18','19','20']
+    
     master_df = master_df[master_df['EventCode'].isin(target_codes)]
+    
     master_df['Score'] = (master_df['AvgTone'] * master_df['Goldstein'] * master_df['NumArticles'])
     return master_df
 
@@ -378,7 +382,7 @@ if not df.empty:
             if st.button("🚀 Run Deep Scan", use_container_width=True, help="Analyze top 20 events using AI"):
                 with st.status("🕵️ AI Analyst Working (Zero-Dependency)...", expanded=True) as status:
                     verified_rows = []
-                    candidates = filtered_df.head(20)
+                    candidates = filtered_df.head(200)
                     progress_bar = st.progress(0)
                     for i, (index, row) in enumerate(candidates.iterrows()):
                         progress_bar.progress((i + 1) / len(candidates))
