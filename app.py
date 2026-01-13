@@ -146,14 +146,32 @@ def verify_and_justify(url):
 
         # 4. GOLD STANDARD CONTEXT (The 'Definition' of relevance)
         geopolitical_context = """
-        International relations military conflict war army navy air force troops defense 
-        sovereignty border dispute territorial integrity diplomacy foreign policy 
-        united nations nato european union sanctions trade war espionage cyber warfare 
-        nuclear weapons arms control peacekeeping insurgency coup d'etat rebellion 
-        civil unrest government regime parliament ministry of foreign affairs ambassador 
-        treaty bilateral agreement geopolitical strategy statecraft security services 
-        intelligence agency military alliance strategic interests
-        """
+    # --- Core State Conflict ---
+    International relations military conflict war army navy air force troops defense 
+    sovereignty border dispute territorial integrity diplomacy foreign policy 
+    united nations nato european union alliance strategic interests statecraft
+    
+    # --- Modern & Hybrid Threats ---
+    hybrid warfare gray zone proxy war mercenary pmc wagner militia separatist 
+    insurgency rebellion coup d'etat regime change martial law civil unrest 
+    terrorism guerrilla paramilitary asymmetric warfare cyber warfare espionage 
+    disinformation propaganda information operations sabotage
+    
+    # --- Economic & Resource Warfare ---
+    sanctions trade war embargo blockade tariff protectionism decoupling 
+    energy security pipeline supply chain rare earth minerals debt trap 
+    exclusive economic zone eez maritime dispute shipping lane
+    
+    # --- Escalation & Violence ---
+    nuclear weapons arms control ballistic missile drone strike uav air strike 
+    bombardment shelling skirmish standoff mobilization annexation occupation 
+    genocide ethnic cleansing refugees humanitarian crisis atrocities war crimes
+    
+    # --- Diplomatic & Legal ---
+    treaty bilateral agreement ultimatum brinkmanship peacekeeping 
+    security council geneva convention international law ambassador 
+    expulsion persona non grata
+"""
         
         # 5. COMPUTE SIMILARITY (Pure Python)
         vector_article = text_to_vector(text_content)
