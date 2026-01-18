@@ -52,11 +52,11 @@ def calculate_row_based_metrics_with_lookback(df, horizon_int):
     df = df.copy()
     
     # 1. Define the Window
-    window_size = horizon_int + 1
+    #window_size = horizon_int + 1
 
     # 2. Determine if we are "Under Alert" (Coverage)
     # If I predicted an alert today or in the last 'horizon' days, the alarm is ON.
-    df['Alert_Active'] = df['Predicted_Alert'].rolling(window=window_size, min_periods=1).sum() > 0
+    df['Alert_Active'] = df['Predicted_Alert'].shift(1).rolling(window=horizon_int, min_periods=0).sum() > 0
     
     # 3. Determine if an Event is "Valid" (Imminent)
     # We use the Target column corresponding to the horizon.
@@ -78,57 +78,61 @@ def calculate_row_based_metrics_with_lookback(df, horizon_int):
     # 4. Assign Result Types
     df['Result_Type'] = 'ERR' 
 
-    # TP: The Alarm is ON, and an Event is Coming (or here)
-    df.loc[mask_alert_on & mask_event_coming, 'Result_Type'] = 'TP'
-
-
-    # FP: The Alarm is ON, but NO Event is coming
-    df.loc[mask_alert_on & mask_no_event_coming, 'Result_Type'] = 'FP'
-
-    # FN: The Alarm is OFF, but an Event IS Coming
-    df.loc[mask_alert_off & mask_event_coming, 'Result_Type'] = 'FN'
-
-    # TN: The Alarm is OFF, and NO Event is coming
-    df.loc[mask_alert_off & mask_no_event_coming, 'Result_Type'] = 'TN'
+    # Attack in D+1, Predicted
+    #1
+    df.loc[event_occurred & mask_alert_off, 'Result_Type'] = 'FN'
     
-        #TP mask alert is on and event is present current override FPs 
-    df.loc[mask_alert_on & event_occurred, 'Result_Type'] = 'TP'
+    df.loc[event_occurred & mask_alert_on, 'Result_Type'] = 'TP'
+    
+    df.loc[not_event_occurred & mask_alert_off, 'Result_Type'] = 'TN'
+
+    df.loc[not_event_occurred & mask_alert_on, 'Result_Type'] = 'FP'
+
+
 
 
     return df
 
-def calculate_coverage_metrics(y_true_daily, y_pred_alerts, horizon_days, y_target):
+import pandas as pd
+import numpy as np
+
+import pandas as pd
+
+def calculate_coverage_metrics(y_true_daily, y_pred_alerts, horizon_days):
     """
     Standard Coverage Metric Calculator.
-    - y_true_daily: Actual events happening TODAY (df['Event_Occurred'])
-    - y_pred_alerts: Raw predicted alerts (df['Predicted_Alert'])
-    - y_target: Future target events (df['Event_Next_XD'])
+    - Coverage starts TOMORROW (Shift 1).
+    - Checks if an Active Alert "covers" the Event happening Today.
     """
-    # 1. Setup Window
-    window_size = horizon_days + 1
+    # 1. Setup Window (Strictly Future = horizon_days)
+    # e.g., if horizon is 3, window is 3 (Days T+1, T+2, T+3)
+    window_size = int(horizon_days)
     
-    # 2. Calculate Prediction Coverage (Alert Active)
-    alert_series = pd.Series(y_pred_alerts)
-    active_alerts_sum = alert_series.rolling(window=window_size, min_periods=1).sum()
-    y_pred_coverage = (active_alerts_sum > 0).astype(int)
+    # 2. ALIGN INDICES (Crucial Step!)
+    # We force both series to have indices 0, 1, 2... so they match perfectly.
+    y_true_aligned = pd.Series(y_true_daily).reset_index(drop=True)
+    alert_series = pd.Series(y_pred_alerts).reset_index(drop=True)
     
-    # 3. Align Indices
-    y_true_today = y_true_daily.reset_index(drop=True)
-    y_target_future = y_target.reset_index(drop=True)
-    y_pred = y_pred_coverage.reset_index(drop=True)
+    # 3. Calculate Prediction Coverage (Alert Active)
+    # Shift(1) moves the start to Tomorrow.
+    # fillna(0) ensures the first row isn't NaN (which breaks boolean logic)
+    active_alerts_sum = alert_series.shift(1).rolling(window=window_size, min_periods=1).sum().fillna(0)
     
-    # ---------------------------------------------------------
-    # 4. APPLY THE OVERRIDE LOGIC HERE
-    # The "Truth" is 1 if an event is in the Future OR Today.
-    # This matches: df.loc[mask_alert_on & event_occurred, 'Result_Type'] = 'TP'
-    # ---------------------------------------------------------
-    y_truth_inclusive = ((y_true_today == 1) | (y_target_future == 1)).astype(int)
-
-    # 5. Calculate Metrics using the Inclusive Truth
-    TP = int(((y_pred == 1) & (y_truth_inclusive == 1)).sum())
-    FP = int(((y_pred == 1) & (y_truth_inclusive == 0)).sum())
-    FN = int(((y_pred == 0) & (y_truth_inclusive == 1)).sum())
-    TN = int(((y_pred == 0) & (y_truth_inclusive == 0)).sum())
+    # Create Masks using the aligned series
+    mask_alert_on = (active_alerts_sum > 0)
+    mask_alert_off = (active_alerts_sum == 0)
+    
+    # 4. Define Truth
+    # We compare against the actual event happening TODAY (y_true_aligned)
+    # Ensure this is boolean (0 or 1)
+    event_occurred = (y_true_aligned == 1)
+    not_event_occurred = (y_true_aligned == 0)
+    
+    # 5. Calculate Metrics (Using .sum() to count Trues)
+    TP = int((event_occurred & mask_alert_on).sum())
+    FP = int((not_event_occurred & mask_alert_on).sum())
+    FN = int((event_occurred & mask_alert_off).sum())
+    TN = int((not_event_occurred & mask_alert_off).sum())
     
     # 6. Calculate Rates
     try:
@@ -137,6 +141,9 @@ def calculate_coverage_metrics(y_true_daily, y_pred_alerts, horizon_days, y_targ
         f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
     except:
         precision = recall = f1 = 0.0
+        
+    # Return the coverage mask formatted as 0/1 for consistency
+    y_pred_coverage = mask_alert_on.astype(int)
         
     return TP, FP, FN, TN, precision, recall, f1, y_pred_coverage
     
@@ -150,7 +157,7 @@ def optimize_threshold_for_coverage(y_true_daily, y_proba_smoothed, horizon_days
     
     for thresh in thresholds:
         y_pred_binary = (y_proba_smoothed >= thresh).astype(int)
-        _, _, _, _, _, _, f1, _ = calculate_coverage_metrics(y_true_daily, y_pred_binary, horizon_days, y_target)
+        _, _, _, _, _, _, f1, _ = calculate_coverage_metrics(y_true_daily, y_pred_binary, horizon_days)
         if f1 > best_f1:
             best_f1 = f1
             best_threshold = thresh
@@ -224,10 +231,39 @@ base_daily_df["Article_Count_ZScore"] = base_daily_df["Article_Count_ZScore"].fi
 
 # 3. Scenarios
 scenarios = {
-    "GoldsteinScale_RollingMean": "df['GoldsteinScale'].rolling(window, min_periods=1).mean()"
-    
+    "GoldsteinScale": "df['GoldsteinScale']",
+    "NumArticles": "df['NumArticles']",
+    "AvgTone": "df['AvgTone']",
+    "AvgTone_X_NumArticles": "df['AvgTone']*df['NumArticles']",
+    "AvgTone_X_NumArticles_X_GoldsteinScale": "df['AvgTone']*df['NumArticles']*df['GoldsteinScale']",
+    "AvgTone_RollingMean": "df['AvgTone'].rolling(window, min_periods=1).mean()",
+    "NumArticles_RollingMean": "df['NumArticles'].rolling(window, min_periods=1).mean()",
+    "NumArticles_RollingMedian": "df['NumArticles'].rolling(window, min_periods=1).median()",
+    "GoldsteinScale_RollingMean": "df['GoldsteinScale'].rolling(window, min_periods=1).mean()",
+    "AvgTone_RollingMedian": "df['AvgTone'].rolling(window, min_periods=1).median()",
+    "GoldsteinScale_RollingMedian": "df['GoldsteinScale'].rolling(window, min_periods=1).median()",
+    "AvgTone_X_NumArticles_RollingMean": "(df['AvgTone']*df['NumArticles']).rolling(window, min_periods=1).mean()",
+    "AvgTone_X_NumArticles_RollingMedian": "(df['AvgTone']*df['NumArticles']).rolling(window, min_periods=1).median()",
+    "AvgTone_X_NumArticles_X_GoldsteinScale_RollingMean": "(df['AvgTone']*df['NumArticles']*df['GoldsteinScale']).rolling(window, min_periods=1).mean()",
+    "AvgTone_X_NumArticles_X_GoldsteinScale_RollingMedian": "(df['AvgTone']*df['NumArticles']*df['GoldsteinScale']).rolling(window, min_periods=1).median()",
+    # Z-SCORE SCENARIOS
+    "GoldsteinScale_Zscore": "((df['GoldsteinScale'] - df['GoldsteinScale'].rolling(window, min_periods=1).mean()) / df['GoldsteinScale'].rolling(window, min_periods=1).std())",
+    "AvgTone_Zscore": "((df['AvgTone'] - df['AvgTone'].rolling(window, min_periods=1).mean()) / df['AvgTone'].rolling(window, min_periods=1).std())",
+    "AvgTone_X_NumArticles_Zscore": "((df['AvgTone']*df['NumArticles']) - (df['AvgTone']*df['NumArticles']).rolling(window, min_periods=1).mean()) / (df['AvgTone']*df['NumArticles']).rolling(window, min_periods=1).std()",
+    "AvgTone_X_NumArticles_X_GoldsteinScale_Zscore": "((df['AvgTone']*df['NumArticles']*df['GoldsteinScale']) - (df['AvgTone']*df['NumArticles']*df['GoldsteinScale']).rolling(window, min_periods=1).mean()) / (df['AvgTone']*df['NumArticles']*df['GoldsteinScale']).rolling(window, min_periods=1).std()",
+    "NumArticles_Zscore": "((df['NumArticles']) - (df['NumArticles']).rolling(window, min_periods=1).mean()) / (df['NumArticles']).rolling(window, min_periods=1).std()",
+    "NumMentions_Zscore": "((df['NumMentions']) - (df['NumMentions']).rolling(window, min_periods=1).mean()) / (df['NumMentions']).rolling(window, min_periods=1).std()",
+    "NumMentions": "df['NumMentions']",
+    "NumSources_Zscore": "((df['NumSources']) - (df['NumSources']).rolling(window, min_periods=1).mean()) / (df['NumSources']).rolling(window, min_periods=1).std()",
+    "NumSources": "df['NumSources']",
+    "NumSourcesXNumMentionsXNumArticles_Zscore": "((df['NumSources']*df['NumMentions']*df['NumArticles']) - (df['NumSources']*df['NumMentions']*df['NumArticles']).rolling(window, min_periods=1).mean()) / (df['NumSources']*df['NumMentions']*df['NumArticles']).rolling(window, min_periods=1).std()",
+    "NumSourcesXNumMentionsXNumArticles": "df['NumSources']*df['NumMentions']*df['NumArticles']",
+    "NumMentions_RollingMean": "df['NumMentions'].rolling(window, min_periods=1).mean()",
+    "NumSources_RollingMean": "df['NumSources'].rolling(window, min_periods=1).mean()",
+    "NumSourcesXNumMentionsXNumArticlesXAvgTone_RollingMean": "(df['NumSources']*df['NumMentions']*df['NumArticles']*df['AvgTone']).rolling(window, min_periods=1).mean()"
 }
 aggregations = ["sum", "mean", "median"]
+
 
 all_results = []
 run_data_cache = {}
@@ -344,9 +380,7 @@ for scenario_name, scenario_formula in scenarios.items():
                     TP, FP, FN, TN, prec, rec, f1, coverage_mask = calculate_coverage_metrics(
                         y_true_daily_test, 
                         y_pred_binary, 
-                        horizon_int, 
-                        y_target_inclusive  # <--- The fix
-)                    
+                        horizon_int)                    
                     try: auc_val = roc_auc_score(y_test_target, y_test_smooth)
                     except: auc_val = 0.5
                     
@@ -464,10 +498,10 @@ print("\n>>> RUNNING CUSTOM SCENARIO <<<")
 
 CUSTOM_SCENARIO = "GoldsteinScale_RollingMean"         
 CUSTOM_AGG      = "sum"                  
-CUSTOM_HORIZON  = "3-day"                
+CUSTOM_HORIZON  = "1-day"                
 CUSTOM_MODEL    = "Random Forest"              
-CUSTOM_THRESH   = 0.54                   
-
+CUSTOM_THRESH   = 0.47                   
+nam="CUSTOM_RUN"+name
 generate_alert_table_full(
     run_data_cache, 
     CUSTOM_SCENARIO, 
@@ -476,5 +510,5 @@ generate_alert_table_full(
     CUSTOM_MODEL, 
     CUSTOM_THRESH, 
     OUT_DIR, 
-    "CUSTOM_RUN"
+    nam
 )
