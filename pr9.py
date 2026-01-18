@@ -497,8 +497,8 @@ if not results_df.empty:
 print("\n>>> RUNNING CUSTOM SCENARIO <<<")
 
 CUSTOM_SCENARIO = "GoldsteinScale_RollingMean"         
-CUSTOM_AGG      = "sum"                  
-CUSTOM_HORIZON  = "1-day"                
+CUSTOM_AGG      = "mean"                  
+CUSTOM_HORIZON  = "3-day"                
 CUSTOM_MODEL    = "Random Forest"              
 CUSTOM_THRESH   = 0.47                   
 nam="CUSTOM_RUN"+name
