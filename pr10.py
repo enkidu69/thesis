@@ -238,8 +238,13 @@ scenarios = {
     "NumSources_RollingMean": "df['NumSources'].rolling(window, min_periods=1).mean()",
     "NumSourcesXNumMentionsXNumArticlesXAvgTone_RollingMean": "(df['NumSources']*df['NumMentions']*df['NumArticles']*df['AvgTone']).rolling(window, min_periods=1).mean()"
 }
-#scenarios = {"NumArticles_RollingMedian": "df['NumArticles'].rolling(window, min_periods=1).median()"}
 aggregations = ["sum", "mean", "median"]
+
+#scenarios = {"GoldsteinScale_RollingMedian": "df['GoldsteinScale'].rolling(window, min_periods=1).median()"}
+
+#aggregations = ["mean"]
+
+
 
 all_results = []
 run_data_cache = {}
@@ -466,11 +471,11 @@ if not results_df.empty:
 # ==============================================================================
 print("\n>>> RUNNING CUSTOM SCENARIO <<<")
 
-CUSTOM_SCENARIO = "NumArticles_RollingMedian"         
-CUSTOM_AGG      = "sum"                  
+CUSTOM_SCENARIO = "GoldsteinScale_RollingMedian"         
+CUSTOM_AGG      = "mean"                  
 CUSTOM_HORIZON  = "7-day"                
-CUSTOM_MODEL    = "Random Forest"              
-CUSTOM_THRESH   = 0.57                   
+CUSTOM_MODEL    = "XGBoost"              
+CUSTOM_THRESH   = 0.48                   
 
 generate_alert_table_full(
     run_data_cache, 
