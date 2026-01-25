@@ -240,9 +240,9 @@ scenarios = {
 }
 aggregations = ["sum", "mean", "median"]
 
-#scenarios = {"GoldsteinScale_RollingMedian": "df['GoldsteinScale'].rolling(window, min_periods=1).median()"}
+#scenarios = {"GoldsteinScale": "df['GoldsteinScale']"}
 
-#aggregations = ["mean"]
+#aggregations = ["median"]
 
 
 
@@ -274,8 +274,11 @@ for scenario_name, scenario_formula in scenarios.items():
         daily["Tone_Rate_of_Change"] = daily["Tone_MA_7"].pct_change().replace([np.inf, -np.inf], 0).fillna(0)
         
         feature_cols = ["Global_Daily_AvgTone_Sum", "Tone_MA_7", "Tone_Std_7", "Tone_Rate_of_Change", "Article_Count_ZScore"]
-        
-        train_df = daily[(daily["Date"] >= "2018-01-01") & (daily["Date"] <= "2024-12-31")].copy()
+        #FR
+        train_df = daily[(daily["Date"] >= "2022-01-01") & (daily["Date"] <= "2024-12-31")].copy()
+        #others
+        #train_df = daily[(daily["Date"] >= "2018-01-01") & (daily["Date"] <= "2024-12-31")].copy()
+
         test_df = daily[daily["Date"] > "2024-12-31"].copy()
         
         if len(train_df) == 0 or len(test_df) == 0: 
@@ -471,11 +474,11 @@ if not results_df.empty:
 # ==============================================================================
 print("\n>>> RUNNING CUSTOM SCENARIO <<<")
 
-CUSTOM_SCENARIO = "GoldsteinScale_RollingMedian"         
-CUSTOM_AGG      = "mean"                  
+CUSTOM_SCENARIO = "GoldsteinScale"         
+CUSTOM_AGG      = "median"                  
 CUSTOM_HORIZON  = "7-day"                
 CUSTOM_MODEL    = "XGBoost"              
-CUSTOM_THRESH   = 0.48                   
+CUSTOM_THRESH   = 0.57                   
 
 generate_alert_table_full(
     run_data_cache, 
