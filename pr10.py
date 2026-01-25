@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
 from sklearn.linear_model import LinearRegression, LogisticRegression, LogisticRegressionCV
-from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error, classification_report, confusion_matrix, precision_recall_curve, roc_auc_score
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error, classification_report, confusion_matrix, precision_recall_curve, roc_auc_score, average_precision_score
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier, IsolationForest
 from sklearn.model_selection import TimeSeriesSplit
@@ -91,7 +91,7 @@ def calculate_row_based_metrics_with_lookback(df, horizon_days):
 def calculate_coverage_metrics(y_true_daily, y_pred_alerts, horizon_days):
     """
     Metric Calculator used for Optimization.
-    NOW UPDATED to use the exact same logic as the Custom Report.
+    Uses the exact same logic as the Custom Report.
     """
     alert_series = pd.Series(y_pred_alerts)
     
@@ -240,12 +240,6 @@ scenarios = {
 }
 aggregations = ["sum", "mean", "median"]
 
-#scenarios = {"GoldsteinScale": "df['GoldsteinScale']"}
-
-#aggregations = ["median"]
-
-
-
 all_results = []
 run_data_cache = {}
 
@@ -274,11 +268,8 @@ for scenario_name, scenario_formula in scenarios.items():
         daily["Tone_Rate_of_Change"] = daily["Tone_MA_7"].pct_change().replace([np.inf, -np.inf], 0).fillna(0)
         
         feature_cols = ["Global_Daily_AvgTone_Sum", "Tone_MA_7", "Tone_Std_7", "Tone_Rate_of_Change", "Article_Count_ZScore"]
-        #FR
-        train_df = daily[(daily["Date"] >= "2022-01-01") & (daily["Date"] <= "2024-12-31")].copy()
-        #others
-        #train_df = daily[(daily["Date"] >= "2018-01-01") & (daily["Date"] <= "2024-12-31")].copy()
-
+        
+        train_df = daily[(daily["Date"] >= "2018-01-01") & (daily["Date"] <= "2024-12-31")].copy()
         test_df = daily[daily["Date"] > "2024-12-31"].copy()
         
         if len(train_df) == 0 or len(test_df) == 0: 
@@ -323,6 +314,7 @@ for scenario_name, scenario_formula in scenarios.items():
                     
                     if model_name == "Isolation Forest":
                         model.fit(X_train)
+                        # Anomaly scoring: lower = abnormal. Negate so higher = abnormal (like prob)
                         y_train_raw = -model.decision_function(X_train)
                         y_test_raw = -model.decision_function(X_test)
                         scaler = MinMaxScaler()
@@ -358,18 +350,24 @@ for scenario_name, scenario_formula in scenarios.items():
                     y_true_daily_test = test_df["Event_Occurred"]
                     TP, FP, FN, TN, prec, rec, f1, coverage_mask = calculate_coverage_metrics(y_true_daily_test, y_pred_binary, horizon_int)
                     
+                    # --- NEW: Calculate AUPRC ---
+                    try:
+                        auprc_val = average_precision_score(y_test_target, y_test_smooth)
+                    except:
+                        auprc_val = 0.0
+
                     try: auc_val = roc_auc_score(y_test_target, y_test_smooth)
                     except: auc_val = 0.5
                     
                     status = "ok" if auc_val >= 0.6 else "filtered_low_auc"
                     if status == "ok":
-                         print(f"  [OK] {horizon} {model_name}: AUC={auc_val:.3f}, F1={f1:.3f}")
+                         print(f"  [OK] {horizon} {model_name}: AUC={auc_val:.3f}, AUPRC={auprc_val:.3f}, F1={f1:.3f}")
                     else:
                          print(f"  [Skip] {horizon} {model_name}: Low AUC ({auc_val:.3f})")
 
                     all_results.append({
                         "scenario": scenario_name, "aggregation": aggregation, "horizon": horizon, "model": model_name,
-                        "status": status, "auc": auc_val, "f1": f1, "precision": prec, "recall": rec,
+                        "status": status, "auc": auc_val, "auprc": auprc_val, "f1": f1, "precision": prec, "recall": rec,
                         "TP": TP, "FP": FP, "FN": FN, "TN": TN, "opt_threshold": opt_thresh
                     })
                     trained_models_horizon[horizon][model_name] = trained_obj
@@ -403,18 +401,24 @@ def generate_alert_table_full(run_data_cache, scenario, aggregation, horizon, mo
     model_obj = data['trained_models'][horizon][model_name]
     feature_cols = data['feature_cols']
     
+    # ---------------------------------------------------------
+    # CORRECTED PREDICTION LOGIC FOR ISOLATION FOREST
+    # ---------------------------------------------------------
     if isinstance(model_obj, tuple):
-        tag = model_obj[0]
-        if tag == "pipeline":
-            _, scaler, clf = model_obj
-            probs_raw = clf.predict_proba(scaler.transform(test_df[feature_cols].replace([np.inf, -np.inf], 0).fillna(0)))[:, 1]
-            probs = probs_raw
-        elif isinstance(model_obj[2], IsolationForest):
-            _, scaler, clf = model_obj
-            raw_scores = -clf.decision_function(test_df[feature_cols].replace([np.inf, -np.inf], 0).fillna(0))
+        _, scaler, clf = model_obj
+        
+        if isinstance(clf, IsolationForest):
+            # IsoForest: Raw Features -> Decision Function -> Scaler
+            X_test_raw = test_df[feature_cols].replace([np.inf, -np.inf], 0).fillna(0)
+            raw_scores = -clf.decision_function(X_test_raw)
             probs = scaler.transform(raw_scores.reshape(-1, 1)).flatten()
+        elif model_obj[0] == "pipeline":
+             # LR: Scaler -> Predict Proba
+            X_test_scaled = scaler.transform(test_df[feature_cols].replace([np.inf, -np.inf], 0).fillna(0))
+            probs = clf.predict_proba(X_test_scaled)[:, 1]
         else:
-            probs = np.zeros(len(test_df))
+             probs = np.zeros(len(test_df))
+             
     elif model_name == "XGBoost":
          probs = model_obj.predict_proba(test_df[feature_cols].replace([np.inf, -np.inf], 0).fillna(0).values)[:, 1]
     else:
@@ -434,6 +438,20 @@ def generate_alert_table_full(run_data_cache, scenario, aggregation, horizon, mo
     test_df["Threshold_Used"] = threshold
     test_df["Model_Used"] = model_name
     
+    # --- NEW: Calculate AUPRC for this specific run ---
+    # Find target column
+    target_col = f"Event_Next_{horizon_int}D"
+    if target_col in test_df.columns:
+        try:
+            run_auprc = average_precision_score(test_df[target_col], probs_smooth)
+        except:
+            run_auprc = 0.0
+    else:
+        run_auprc = 0.0
+    
+    # ADD TO SPREADSHEET
+    test_df['Run_AUPRC'] = run_auprc
+    
     # --- APPLY ROW-BASED LOGIC ---
     test_df = calculate_row_based_metrics_with_lookback(test_df, horizon_int)
     
@@ -444,25 +462,27 @@ def generate_alert_table_full(run_data_cache, scenario, aggregation, horizon, mo
     print(f"    FP: {counts.get('FP', 0)}")
     print(f"    FN: {counts.get('FN', 0)}")
     print(f"    TN: {counts.get('TN', 0)}")
+    print(f"    Run AUPRC: {run_auprc:.4f}")
     
     # Save
     fname = f"{file_prefix}_{scenario}_{aggregation}_{horizon}_{model_name}.xlsx"
     _save_csv(test_df, os.path.join(output_dir, fname))
     print(f"  Saved full alert table: {fname}")
 
-# Generate Best Model Alerts
+# Generate Best Model Alerts (NOW SELECTS BY AUPRC)
 if not results_df.empty:
     valid_results = results_df[results_df['status'] == 'ok']
     if not valid_results.empty:
-        best_f1 = valid_results.loc[valid_results['f1'].idxmax()]
-        print(f"\nBest Model by Coverage F1: {best_f1['scenario']} {best_f1['model']} (F1={best_f1['f1']:.3f})")
+        # --- CHANGED SELECTION CRITERIA TO AUPRC ---
+        best_model = valid_results.loc[valid_results['auprc'].idxmax()]
+        print(f"\nBest Model by AUPRC: {best_model['scenario']} {best_model['model']} (AUPRC={best_model['auprc']:.3f}, F1={best_model['f1']:.3f})")
         generate_alert_table_full(
             run_data_cache, 
-            best_f1['scenario'], 
-            best_f1['aggregation'], 
-            best_f1['horizon'], 
-            best_f1['model'], 
-            best_f1['opt_threshold'], 
+            best_model['scenario'], 
+            best_model['aggregation'], 
+            best_model['horizon'], 
+            best_model['model'], 
+            best_model['opt_threshold'], 
             OUT_DIR, 
             "best_model_alerts"
         )
@@ -474,11 +494,11 @@ if not results_df.empty:
 # ==============================================================================
 print("\n>>> RUNNING CUSTOM SCENARIO <<<")
 
-CUSTOM_SCENARIO = "GoldsteinScale"         
-CUSTOM_AGG      = "median"                  
+CUSTOM_SCENARIO = "NumArticles_RollingMedian"         
+CUSTOM_AGG      = "sum"                  
 CUSTOM_HORIZON  = "7-day"                
-CUSTOM_MODEL    = "XGBoost"              
-CUSTOM_THRESH   = 0.57                   
+CUSTOM_MODEL    = "Random Forest"              
+CUSTOM_THRESH   = 0.54                   
 
 generate_alert_table_full(
     run_data_cache, 
