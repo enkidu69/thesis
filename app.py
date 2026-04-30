@@ -250,7 +250,9 @@ def load_gkg_v1_data(days):
     urls = generate_gkg_v1_urls(days)
     use_cols = [0, 1, 3, 4, 6, 7, 10]
     col_names = ['Date', 'NumArts', 'Themes', 'Locations', 'Organizations', 'ToneRaw', 'SourceURL']
-    STRICT_THEMES = ['ARMEDCONFLICT', 'CYBER_ATTACK', 'TERROR', 'MILITARY', 'SECURITY_SERVICES', 'STATE_OF_EMERGENCY', 'BORDER', 'SANCTIONS', 'ELECTION_FRAUD', 'POLITICAL_TURMOIL', 'MANMADE_DISASTER_IMPLIED']
+    #STRICT_THEMES = ['ARMEDCONFLICT', 'CYBER_ATTACK', 'TERROR', 'MILITARY', 'SECURITY_SERVICES', 'STATE_OF_EMERGENCY', 'BORDER', 'SANCTIONS', 'ELECTION_FRAUD', 'POLITICAL_TURMOIL', 'MANMADE_DISASTER_IMPLIED']
+    STRICT_THEMES = ['CYBER_ATTACK']
+
     pattern = '|'.join(STRICT_THEMES)
     
     master_rows = []
@@ -468,7 +470,7 @@ if not g_view.empty:
         st.info(f"📌 **Selected Event:** [Click to Read Article]({obj['SourceURL']}) (Weight: {obj['Weight']:.2f})")
 
     st.markdown("### 🔗 Top Negative Impact Sources (Sorted by Lowest Weight)")
-    table_view = g_view.sort_values('Weight', ascending=True)[['Date', 'SourceURL', 'Organizations', 'Weight', 'AvgTone']].head(50).copy()
+    table_view = g_view.sort_values('Weight', ascending=True)[['Date', 'SourceURL', 'Organizations', 'Weight', 'AvgTone']].head(5000).copy()
     st.dataframe(table_view, column_config={
         "SourceURL": st.column_config.LinkColumn("Source Link", width="medium"),
         "Weight": st.column_config.NumberColumn("Weight (NumArts * Tone)", format="%.2f", width="small")
