@@ -56,7 +56,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- STATE MANAGEMENT ---
-if 'time_window_days' not in st.session_state: st.session_state.time_window_days = 7 
+if 'time_window_days' not in st.session_state: st.session_state.time_window_days = 1 
 if 'origin_country' not in st.session_state: st.session_state.origin_country = "All"
 if 'target_country' not in st.session_state: st.session_state.target_country = "All"
 if 'selected_country' not in st.session_state: st.session_state.selected_country = None
@@ -120,25 +120,10 @@ def get_cosine(vec1, vec2):
     return numerator / denominator
 
 def verify_and_justify(url):
-    """
-    Enhanced AI Analyst with mimicked Browser Session Headers and strict 0% threshold.
-    """
     try:
-        # FULL BROWSER HEADERS MIMIC
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
-            'Cache-Control': 'max-age=0'
         }
-        
         response = requests.get(url, headers=headers, timeout=4)
         if response.status_code != 200: return False, "⚠️ Link inaccessible or broken."
         
@@ -149,15 +134,7 @@ def verify_and_justify(url):
         text_content = f"{article.title} {article.text[:1500]}"
         if len(text_content) < 50: return False, "⚠️ Content too short for analysis."
 
-        geopolitical_context = """
-    International relations military conflict war army navy air force troops defense 
-    sovereignty border dispute territorial integrity diplomacy foreign policy 
-    united nations nato european union alliance strategic interests statecraft
-    hybrid warfare gray zone proxy war mercenary pmc wagner militia separatist 
-    insurgency rebellion coup d'etat regime change martial law civil unrest 
-    terrorism guerrilla paramilitary asymmetric warfare cyber warfare espionage 
-    disinformation propaganda information operations sabotage
-    """
+        geopolitical_context = "cyber attack hack ransomware ddos data breach malware infosec phishing apt state sponsored cyber warfare espionage"
         vector_article = text_to_vector(text_content)
         vector_context = text_to_vector(geopolitical_context)
         score = get_cosine(vector_article, vector_context)
@@ -168,12 +145,10 @@ def verify_and_justify(url):
         except:
             summary_text = text_content[:300] + "..."
 
-        # CHANGED: ONLY 0% IS LOW RELEVANCE. Any positive match is verified.
         if score > 0:
             return True, f"✅ Verified ({int(score*100)}%): {summary_text}"
         else:
-            return False, f"⚠️ Low Relevance (0%): No geopolitical vocabulary match."
-
+            return False, f"⚠️ Low Relevance (0%): No cyber vocabulary match."
     except Exception as e: return False, f"⚠️ Analysis Error: {str(e)}"
 
 # --- URL GENERATORS ---
@@ -196,17 +171,23 @@ def generate_gdelt_event_urls(days_back):
         current_time -= timedelta(minutes=15)
     return urls
 
-def generate_gkg_v1_urls(days_back):
-    """Generates URLs for GKG V1 (Daily Files)"""
-    base_url = "http://data.gdeltproject.org/gkg/"
+def generate_gkg_v2_urls_fast(hours_back=12):
+    """Generates exact GKG V2 URLs, offset by 30 minutes to ensure files exist on server."""
+    base_url = "http://data.gdeltproject.org/gdeltv2/"
     urls = []
     now = datetime.utcnow()
-    current_date = now - timedelta(days=1)
-    for _ in range(days_back):
-        date_str = current_date.strftime("%Y%m%d")
-        url = f"{base_url}{date_str}.gkg.csv.zip"
-        urls.append(url)
-        current_date -= timedelta(days=1)
+    
+    current_time = now - timedelta(minutes=30) 
+    current_time = current_time.replace(second=0, microsecond=0)
+    discard = current_time.minute % 15
+    current_time -= timedelta(minutes=discard)
+    
+    steps = int(hours_back * 4) 
+    for _ in range(steps):
+        timestamp = current_time.strftime("%Y%m%d%H%M00")
+        urls.append(f"{base_url}{timestamp}.gkg.csv.zip")
+        current_time -= timedelta(minutes=15)
+        
     return urls
 
 # --- DATA LOADERS ---
@@ -219,11 +200,7 @@ def load_gdelt_events(days):
     col_names_ordered = list(sorted_mapping.values())
     master_df = pd.DataFrame()
     
-    progress_text = "Downloading 72h Event Feed..."
-    my_bar = st.progress(0, text=progress_text)
-    
     for i, url in enumerate(urls):
-        if i % 10 == 0: my_bar.progress((i + 1) / len(urls), text=f"Processing Event File {i+1}/{len(urls)}")
         try:
             r = requests.get(url, timeout=10)
             if r.status_code == 200:
@@ -233,7 +210,6 @@ def load_gdelt_events(days):
                         master_df = pd.concat([master_df, df_chunk], ignore_index=True)
         except Exception: continue
     
-    my_bar.empty()
     if master_df.empty: return master_df
     
     for col in ['Goldstein', 'NumArticles', 'AvgTone']:
@@ -246,40 +222,48 @@ def load_gdelt_events(days):
     return master_df
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def load_gkg_v1_data(days):
-    urls = generate_gkg_v1_urls(days)
-    use_cols = [0, 1, 3, 4, 6, 7, 10]
-    col_names = ['Date', 'NumArts', 'Themes', 'Locations', 'Organizations', 'ToneRaw', 'SourceURL']
-    #STRICT_THEMES = ['ARMEDCONFLICT', 'CYBER_ATTACK', 'TERROR', 'MILITARY', 'SECURITY_SERVICES', 'STATE_OF_EMERGENCY', 'BORDER', 'SANCTIONS', 'ELECTION_FRAUD', 'POLITICAL_TURMOIL', 'MANMADE_DISASTER_IMPLIED']
-    STRICT_THEMES = ['CYBER_ATTACK']
-
-    pattern = '|'.join(STRICT_THEMES)
+def load_gkg_v2_data(hours_back=72):
+    """Production GKG pipeline with full caching and cyber theme mapping."""
+    urls = generate_gkg_v2_urls_fast(hours_back)
     
+    if not urls:
+        return pd.DataFrame()
+        
+    use_cols = [1, 4, 8, 9, 13, 15]
+    col_names = ['Date', 'SourceURL', 'Themes', 'Locations', 'Organizations', 'ToneRaw']
+    
+    # Restored Comprehensive Cyber Theme List
+    STRICT_THEMES = [
+        'CYBER_ATTACK', 'HACK', 'HACKER', 'HACKING', 'DATA_BREACH', 'CYBER_SECURITY',
+        'MALWARE', 'RANSOMWARE', 'VIRUS', 'TROJAN', 'SPYWARE', 'BOTNET',
+        'DDOS', 'PHISHING', 'INFOSEC', 
+        'CRIME_CYBER_CRIME', 'STATE_SPONSORED_CYBER'
+    ]
+    
+    pattern = '|'.join([f"(?:^|;){theme}," for theme in STRICT_THEMES])
     master_rows = []
-    progress_text = "Downloading GKG Daily Files..."
-    my_bar = st.progress(0, text=progress_text)
     
-    for i, url in enumerate(urls):
-        my_bar.progress((i + 1) / len(urls), text=f"Processing Day {i+1}/{len(urls)}")
+    for url in urls:
         try:
-            r = requests.get(url, timeout=20)
+            r = requests.get(url, timeout=15)
             if r.status_code == 200:
                 with zipfile.ZipFile(io.BytesIO(r.content)) as z:
                     with z.open(z.namelist()[0]) as f:
-                        for chunk in pd.read_csv(f, sep='\t', header=None, usecols=use_cols, names=col_names, dtype=str, encoding='utf-8', on_bad_lines='skip', chunksize=10000):
-                            filtered_chunk = chunk[chunk['Themes'].str.contains(pattern, na=False, case=False)].copy()
-                            if not filtered_chunk.empty:
-                                filtered_chunk['AvgTone'] = filtered_chunk['ToneRaw'].apply(lambda x: float(str(x).split(',')[0]) if pd.notnull(x) else 0)
-                                filtered_chunk['NumArts'] = pd.to_numeric(filtered_chunk['NumArts'], errors='coerce').fillna(1)
-                                filtered_chunk = filtered_chunk[filtered_chunk['AvgTone'] < 0]
-                                if not filtered_chunk.empty:
-                                    master_rows.append(filtered_chunk)
-        except: continue
-    my_bar.empty()
-
-    if not master_rows: return pd.DataFrame()
+                        df = pd.read_csv(f, sep='\t', header=None, usecols=use_cols, names=col_names, dtype=str, on_bad_lines='skip')
+                        
+                        filtered = df[df['Themes'].str.contains(pattern, na=False, case=False, regex=True)].copy()
+                        
+                        if not filtered.empty:
+                            filtered['AvgTone'] = filtered['ToneRaw'].apply(lambda x: float(str(x).split(',')[0]) if pd.notnull(x) else 0)
+                            filtered['NumArts'] = 1
+                            master_rows.append(filtered)
+        except Exception: 
+            continue
+            
+    if not master_rows: 
+        return pd.DataFrame()
+        
     gkg_df = pd.concat(master_rows, ignore_index=True)
-    gkg_df['Weight'] = gkg_df['NumArts'] * gkg_df['AvgTone']
     
     def parse_location(loc_str):
         if not isinstance(loc_str, str): return None, None, None
@@ -295,7 +279,13 @@ def load_gkg_v1_data(days):
     gkg_df['Country'] = [x[0] for x in parsed]
     gkg_df['Lat'] = [x[1] for x in parsed]
     gkg_df['Lon'] = [x[2] for x in parsed]
-    return gkg_df.dropna(subset=['Lat', 'Lon'])
+    
+    final_df = gkg_df.dropna(subset=['Lat', 'Lon']).copy()
+    
+    if not final_df.empty:
+        final_df['Weight'] = final_df['NumArts'] * final_df['AvgTone'].abs() 
+        
+    return final_df
 
 def fetch_historical_trend(origin, custom_query):
     if origin != "All":
@@ -314,8 +304,8 @@ def fetch_historical_trend(origin, custom_query):
             query_parts.append(keywords[0])
             label += f" reporting on '{keywords[0]}'"
     else:
-        query_parts.append("conflict") 
-        label += " (General Conflict)"
+        query_parts.append("cyber") 
+        label += " (General Cyber)"
     
     final_query = " ".join(query_parts)
     api_base = "https://api.gdeltproject.org/api/v2/doc/doc"
@@ -343,11 +333,12 @@ def fetch_historical_trend(origin, custom_query):
 # ==============================================================================
 st.title("🔥 Geopolitical Conflict Monitor")
 
+# Restored clean loading UI
 with st.status("📡 Updating Intelligence Feeds...", expanded=True) as status:
     st.write("Fetching Real-time Events (Last 72h)...")
     event_df = load_gdelt_events(3)
-    st.write(f"Fetching Historical GKG Data (Last {st.session_state.time_window_days} Days)...")
-    gkg_df = load_gkg_v1_data(st.session_state.time_window_days)
+    st.write(f"Fetching Historical GKG Data (Last {st.session_state.time_window_days * 72} Hours)...")
+    gkg_df = load_gkg_v2_data(hours_back=st.session_state.time_window_days * 72)
     status.update(label="Feeds Active", state="complete", expanded=False)
 
 if not event_df.empty:
@@ -429,7 +420,7 @@ st.markdown("---")
 st.markdown("### 📈 Historical Evolution")
 gc1, gc2 = st.columns([1, 2])
 with gc1: st.info(f"Source: **{st.session_state.origin_country}**")
-with gc2: timeline_query = st.text_input("Timeline Theme/Query", placeholder="e.g. 'Trade', 'Macron', 'China'")
+with gc2: timeline_query = st.text_input("Timeline Theme/Query", placeholder="e.g. 'Cyber', 'Ransomware', 'China'")
 trend_df, label = fetch_historical_trend(st.session_state.origin_country, timeline_query)
 if trend_df is not None and not trend_df.empty:
     base = alt.Chart(trend_df).encode(x=alt.X('date:T', axis=alt.Axis(title='Date', format='%Y-%m-%d')))
@@ -438,11 +429,13 @@ if trend_df is not None and not trend_df.empty:
     st.altair_chart(alt.layer(line_vol, line_tone).resolve_scale(y='independent').properties(height=350), use_container_width=True)
 
 st.markdown("---")
-st.header(f"🌍 Narrative Heatmap (GKG V1 Themes)")
-st.info(f"Filtering NEGATIVE Tone Narratives in: **{st.session_state.origin_country}** (Last {st.session_state.time_window_days} Days)")
+st.header(f"🌍 Narrative Heatmap (GKG V2 Themes)")
+st.info(f"Filtering Themes in: **{st.session_state.origin_country}** (Last {st.session_state.time_window_days * 24} Hours)")
 
 g_view = gkg_df.copy()
-if st.session_state.origin_country != "All": g_view = g_view[g_view['Country'] == st.session_state.origin_country]
+if not g_view.empty and st.session_state.origin_country != "All": 
+    g_view = g_view[g_view['Country'] == st.session_state.origin_country]
+
 org_col1, org_col2 = st.columns([3,1])
 with org_col1:
     org_search = st.text_input("🏢 Filter by Organization", value=st.session_state.gkg_org_filter)
@@ -450,10 +443,9 @@ if org_search:
     st.session_state.gkg_org_filter = org_search
     g_view = g_view[g_view['Organizations'].astype(str).str.contains(org_search, case=False, na=False)]
 
-# MOVED SLIDER BELOW FILTER
 slider_col, _ = st.columns([1, 1])
 with slider_col:
-    new_days = st.slider("GKG Analysis Window (Days)", 1, 90, st.session_state.time_window_days)
+    new_days = st.slider("GKG Analysis Window (Days)", 1, 7, st.session_state.time_window_days)
     if new_days != st.session_state.time_window_days: st.session_state.time_window_days = new_days; st.rerun()
 
 if not g_view.empty:
@@ -463,17 +455,16 @@ if not g_view.empty:
     ], map_style=pdk.map_styles.CARTO_DARK, initial_view_state=pdk.ViewState(latitude=20, longitude=10, zoom=0.8),
     tooltip={"html": "<b>Weight:</b> {Weight}<br/><a href='{SourceURL}' target='_blank' style='color:#FFFF00'>Read Article</a>"})
     
-    # Selection Handler
     event = st.pydeck_chart(deck2, use_container_width=True, on_select="rerun", selection_mode="single-object")
     if event.selection and len(event.selection['objects']) > 0:
         obj = event.selection['objects'][0]
         st.info(f"📌 **Selected Event:** [Click to Read Article]({obj['SourceURL']}) (Weight: {obj['Weight']:.2f})")
 
-    st.markdown("### 🔗 Top Negative Impact Sources (Sorted by Lowest Weight)")
-    table_view = g_view.sort_values('Weight', ascending=True)[['Date', 'SourceURL', 'Organizations', 'Weight', 'AvgTone']].head(5000).copy()
+    st.markdown("### 🔗 Top Event Sources")
+    table_view = g_view.sort_values('Weight', ascending=False)[['Date', 'SourceURL', 'Organizations', 'Weight', 'AvgTone']].head(5000).copy()
     st.dataframe(table_view, column_config={
         "SourceURL": st.column_config.LinkColumn("Source Link", width="medium"),
-        "Weight": st.column_config.NumberColumn("Weight (NumArts * Tone)", format="%.2f", width="small")
+        "Weight": st.column_config.NumberColumn("Weight", format="%.2f", width="small")
     }, use_container_width=True, hide_index=True)
 else:
     st.warning("No GKG narrative data found for this filter.")
