@@ -1,8 +1,5 @@
 import streamlit as st
 import pandas as pd
-import requests
-import zipfile
-import io
 import pydeck as pdk
 import altair as alt
 from datetime import datetime, timedelta
@@ -12,12 +9,17 @@ import nltk
 import math
 import re
 from collections import Counter
+from sqlalchemy import create_engine, text
 
 # --- NLTK SETUP ---
 try:
     nltk.data.find('tokenizers/punkt')
 except LookupError:
     nltk.download('punkt')
+
+# --- DATABASE SETUP ---
+DB_URI = 'postgresql://gdelt_admin:SuperSecurePassword123!@localhost:5432/gdelt_db'
+engine = create_engine(DB_URI)
 
 # 1. PAGE CONFIGURATION
 st.set_page_config(
@@ -120,6 +122,7 @@ def get_cosine(vec1, vec2):
     return numerator / denominator
 
 def verify_and_justify(url):
+    import requests # imported here for safety
     try:
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
@@ -151,143 +154,83 @@ def verify_and_justify(url):
             return False, f"⚠️ Low Relevance (0%): No cyber vocabulary match."
     except Exception as e: return False, f"⚠️ Analysis Error: {str(e)}"
 
-# --- URL GENERATORS ---
-def generate_gdelt_event_urls(days_back):
-    """Generates URLs for V2 Events (15 min updates) - 72 HOURS"""
-    base_url = "http://data.gdeltproject.org/gdeltv2/"
-    urls = []
-    now = datetime.utcnow()
-    hours_to_fetch = 72 
-    current_time = now - timedelta(minutes=15) 
-    current_time = current_time.replace(second=0, microsecond=0)
-    discard = current_time.minute % 15
-    current_time -= timedelta(minutes=discard)
-    
-    steps = int(hours_to_fetch * 4) 
-    for _ in range(steps):
-        timestamp = current_time.strftime("%Y%m%d%H%M%S")
-        url = f"{base_url}{timestamp}.export.CSV.zip"
-        urls.append(url)
-        current_time -= timedelta(minutes=15)
-    return urls
 
-def generate_gkg_v2_urls_fast(hours_back=12):
-    """Generates exact GKG V2 URLs, offset by 30 minutes to ensure files exist on server."""
-    base_url = "http://data.gdeltproject.org/gdeltv2/"
-    urls = []
-    now = datetime.utcnow()
-    
-    current_time = now - timedelta(minutes=30) 
-    current_time = current_time.replace(second=0, microsecond=0)
-    discard = current_time.minute % 15
-    current_time -= timedelta(minutes=discard)
-    
-    steps = int(hours_back * 4) 
-    for _ in range(steps):
-        timestamp = current_time.strftime("%Y%m%d%H%M00")
-        urls.append(f"{base_url}{timestamp}.gkg.csv.zip")
-        current_time -= timedelta(minutes=15)
-        
-    return urls
-
-# --- DATA LOADERS ---
+# --- DATA LOADERS (POSTGRESQL) ---
 @st.cache_data(ttl=3600, show_spinner=False) 
 def load_gdelt_events(days):
-    urls = generate_gdelt_event_urls(3)
-    raw_mapping = {0:'GlobalEventID', 1:'Day', 6:'Actor1Name', 37:'Actor1GeoCountry', 16:'Actor2Name', 45:'Actor2GeoCountry', 28:'EventCode', 30:'Goldstein', 31:'NumMentions', 33:'NumArticles', 34:'AvgTone', 60:'SourceURL'}
-    sorted_mapping = dict(sorted(raw_mapping.items()))
-    use_cols = list(sorted_mapping.keys())
-    col_names_ordered = list(sorted_mapping.values())
-    master_df = pd.DataFrame()
+    """Loads events directly from PostgreSQL."""
+    query = text("""
+            SELECT "GlobalEventID", "Day", "Actor1Name", "Actor1GeoCountry", 
+                "Actor2Name", "Actor2GeoCountry", "EventCode", "Goldstein", 
+                "NumMentions", "NumArticles", "AvgTone", "SourceURL", "EventDate"
+            FROM gdelt_events
+            WHERE "EventDate" >= CURRENT_DATE - INTERVAL '1 day' * :days
+        """)
     
-    for i, url in enumerate(urls):
-        try:
-            r = requests.get(url, timeout=10)
-            if r.status_code == 200:
-                with zipfile.ZipFile(io.BytesIO(r.content)) as z:
-                    with z.open(z.namelist()[0]) as f:
-                        df_chunk = pd.read_csv(f, sep='\t', header=None, usecols=use_cols, names=col_names_ordered, dtype=str)
-                        master_df = pd.concat([master_df, df_chunk], ignore_index=True)
-        except Exception: continue
-    
-    if master_df.empty: return master_df
-    
-    for col in ['Goldstein', 'NumArticles', 'AvgTone']:
-        master_df[col] = pd.to_numeric(master_df[col], errors='coerce').fillna(0)
-    master_df['EventDate'] = pd.to_datetime(master_df['Day'], format='%Y%m%d', errors='coerce')
-    
-    TARGET_ROOT_CODES = ['13', '15', '16', '17', '18', '19', '20']
-    master_df = master_df[master_df['EventCode'].apply(lambda x: str(x).startswith(tuple(TARGET_ROOT_CODES)))]
-    master_df['Score'] = (master_df['AvgTone'] * master_df['Goldstein'] * master_df['NumArticles'])
-    return master_df
+    try:
+        with engine.connect() as conn:
+            master_df = pd.read_sql_query(query, conn, params={'days': days})
+            
+        if master_df.empty: 
+            return master_df
+            
+        # Ensure correct types
+        for col in ['Goldstein', 'NumArticles', 'AvgTone']:
+            master_df[col] = pd.to_numeric(master_df[col], errors='coerce').fillna(0)
+            
+        master_df['Score'] = (master_df['AvgTone'] * master_df['Goldstein'] * master_df['NumArticles'])
+        return master_df
+    except Exception as e:
+        st.error(f"Error loading events from database: {e}")
+        return pd.DataFrame()
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def load_gkg_v2_data(hours_back=72):
-    """Production GKG pipeline with full caching and cyber theme mapping."""
-    urls = generate_gkg_v2_urls_fast(hours_back)
+def load_gkg_v2_data(days):
+    """Loads GKG data directly from PostgreSQL."""
+    query = text("""
+            SELECT "Date", "SourceURL", "Themes", "Locations", "Organizations", "AvgTone"
+            FROM gdelt_gkg
+            WHERE "Date" >= CURRENT_TIMESTAMP - INTERVAL '1 day' * :days
+        """)
     
-    if not urls:
-        return pd.DataFrame()
-        
-    use_cols = [1, 4, 8, 9, 13, 15]
-    col_names = ['Date', 'SourceURL', 'Themes', 'Locations', 'Organizations', 'ToneRaw']
-    
-    # Restored Comprehensive Cyber Theme List
-    STRICT_THEMES = [
-        'CYBER_ATTACK', 'HACK', 'HACKER', 'HACKING', 'DATA_BREACH', 'CYBER_SECURITY',
-        'MALWARE', 'RANSOMWARE', 'VIRUS', 'TROJAN', 'SPYWARE', 'BOTNET',
-        'DDOS', 'PHISHING', 'INFOSEC', 
-        'CRIME_CYBER_CRIME', 'STATE_SPONSORED_CYBER'
-    ]
-    
-    pattern = '|'.join([f"(?:^|;){theme}," for theme in STRICT_THEMES])
-    master_rows = []
-    
-    for url in urls:
-        try:
-            r = requests.get(url, timeout=15)
-            if r.status_code == 200:
-                with zipfile.ZipFile(io.BytesIO(r.content)) as z:
-                    with z.open(z.namelist()[0]) as f:
-                        df = pd.read_csv(f, sep='\t', header=None, usecols=use_cols, names=col_names, dtype=str, on_bad_lines='skip')
-                        
-                        filtered = df[df['Themes'].str.contains(pattern, na=False, case=False, regex=True)].copy()
-                        
-                        if not filtered.empty:
-                            filtered['AvgTone'] = filtered['ToneRaw'].apply(lambda x: float(str(x).split(',')[0]) if pd.notnull(x) else 0)
-                            filtered['NumArts'] = 1
-                            master_rows.append(filtered)
-        except Exception: 
-            continue
+    try:
+        with engine.connect() as conn:
+            gkg_df = pd.read_sql_query(query, conn, params={'days': days})
             
-    if not master_rows: 
+        if gkg_df.empty: 
+            return pd.DataFrame()
+
+        # Parse locations (we still need to do this step in python)
+        def parse_location(loc_str):
+            if not isinstance(loc_str, str): return None, None, None
+            first = loc_str.split(';')[0]
+            parts = first.split('#')
+            if len(parts) > 5:
+                try:
+                    return parts[2], float(parts[4]), float(parts[5])
+                except: return None, None, None
+            return None, None, None
+
+        parsed = gkg_df['Locations'].apply(parse_location)
+        gkg_df['Country'] = [x[0] for x in parsed]
+        gkg_df['Lat'] = [x[1] for x in parsed]
+        gkg_df['Lon'] = [x[2] for x in parsed]
+        
+        final_df = gkg_df.dropna(subset=['Lat', 'Lon']).copy()
+        
+        if not final_df.empty:
+            # Recreate NumArts since we dropped it in the DB insert script
+            final_df['NumArts'] = 1 
+            final_df['Weight'] = final_df['NumArts'] * final_df['AvgTone'].abs() 
+            
+        return final_df
+    except Exception as e:
+        st.error(f"Error loading GKG data from database: {e}")
         return pd.DataFrame()
-        
-    gkg_df = pd.concat(master_rows, ignore_index=True)
-    
-    def parse_location(loc_str):
-        if not isinstance(loc_str, str): return None, None, None
-        first = loc_str.split(';')[0]
-        parts = first.split('#')
-        if len(parts) > 5:
-            try:
-                return parts[2], float(parts[4]), float(parts[5])
-            except: return None, None, None
-        return None, None, None
 
-    parsed = gkg_df['Locations'].apply(parse_location)
-    gkg_df['Country'] = [x[0] for x in parsed]
-    gkg_df['Lat'] = [x[1] for x in parsed]
-    gkg_df['Lon'] = [x[2] for x in parsed]
-    
-    final_df = gkg_df.dropna(subset=['Lat', 'Lon']).copy()
-    
-    if not final_df.empty:
-        final_df['Weight'] = final_df['NumArts'] * final_df['AvgTone'].abs() 
-        
-    return final_df
-
+# ... fetch_historical_trend ...
 def fetch_historical_trend(origin, custom_query):
+    import requests
     if origin != "All":
         query_parts = [f"sourcecountry:{origin}"]
         label = f"Media in {origin}"
@@ -335,10 +278,10 @@ st.title("🔥 Geopolitical Conflict Monitor")
 
 # Restored clean loading UI
 with st.status("📡 Updating Intelligence Feeds...", expanded=True) as status:
-    st.write("Fetching Real-time Events (Last 72h)...")
-    event_df = load_gdelt_events(3)
-    st.write(f"Fetching Historical GKG Data (Last {st.session_state.time_window_days * 72} Hours)...")
-    gkg_df = load_gkg_v2_data(hours_back=st.session_state.time_window_days * 72)
+    st.write(f"Fetching Events from Database (Last {st.session_state.time_window_days} Days)...")
+    event_df = load_gdelt_events(st.session_state.time_window_days)
+    st.write(f"Fetching GKG Data from Database (Last {st.session_state.time_window_days} Days)...")
+    gkg_df = load_gkg_v2_data(st.session_state.time_window_days)
     status.update(label="Feeds Active", state="complete", expanded=False)
 
 if not event_df.empty:
@@ -373,14 +316,14 @@ if not event_df.empty:
     map_df = filtered_df.dropna(subset=['MapLat', 'MapLon'])
 
     country_df = map_df.groupby('Actor2GeoCountry').agg({
-        'Score': 'sum', 'NumArticles': 'sum', 'MapLat': 'first', 'MapLon': 'first', 'Actor2Name': 'count', 'Title': 'first'
-    }).rename(columns={'Actor2Name': 'EventCount', 'Title': 'TopTitle'}).reset_index()
+        'Score': 'sum', 'NumArticles': 'sum', 'MapLat': 'first', 'MapLon': 'first', 'Actor1Name': 'count', 'Title': 'first'
+    }).rename(columns={'Actor1Name': 'EventCount', 'Title': 'TopTitle'}).reset_index()
     country_df['HeatIntensity'] = country_df['Score'].abs()
     country_df = country_df.sort_values('HeatIntensity', ascending=False)
 
     left_panel, right_panel = st.columns([1, 1.2], gap="medium")
     with left_panel:
-        st.subheader("📋 Event Feed (Last 72h)")
+        st.subheader(f"📋 Event Feed (Last {st.session_state.time_window_days} Days)")
         st.dataframe(filtered_df[['EventDate', 'EventCode', 'Summary', 'SourceURL', 'Score']],
             column_config={"EventDate": st.column_config.DateColumn("Date", format="YYYY-MM-DD", width="small"),
                            "SourceURL": st.column_config.LinkColumn("Link", width="small")},
@@ -415,6 +358,8 @@ if not event_df.empty:
             ], initial_view_state=pdk.ViewState(latitude=20, longitude=0, zoom=0.5), map_style=pdk.map_styles.CARTO_DARK, tooltip={"html": "<b>{Actor2GeoCountry}</b><br/>Heat: {Score}"})
             st.pydeck_chart(deck, use_container_width=True)
         else: st.warning("No data for map.")
+else:
+    st.info("No events found in the selected timeframe. Make sure the backfill worker is running!")
 
 st.markdown("---")
 st.markdown("### 📈 Historical Evolution")
@@ -430,7 +375,7 @@ if trend_df is not None and not trend_df.empty:
 
 st.markdown("---")
 st.header(f"🌍 Narrative Heatmap (GKG V2 Themes)")
-st.info(f"Filtering Themes in: **{st.session_state.origin_country}** (Last {st.session_state.time_window_days * 24} Hours)")
+st.info(f"Filtering Themes in: **{st.session_state.origin_country}**")
 
 g_view = gkg_df.copy()
 if not g_view.empty and st.session_state.origin_country != "All": 
@@ -445,8 +390,11 @@ if org_search:
 
 slider_col, _ = st.columns([1, 1])
 with slider_col:
-    new_days = st.slider("GKG Analysis Window (Days)", 1, 7, st.session_state.time_window_days)
-    if new_days != st.session_state.time_window_days: st.session_state.time_window_days = new_days; st.rerun()
+    # Changed slider max from 30 to 365 days to access the full backfill
+    new_days = st.slider("Analysis Window (Days)", 1, 365, st.session_state.time_window_days)
+    if new_days != st.session_state.time_window_days: 
+        st.session_state.time_window_days = new_days
+        st.rerun()
 
 if not g_view.empty:
     deck2 = pdk.Deck(layers=[
